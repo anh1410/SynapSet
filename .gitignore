@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+data/chroma/
+data/uploads/*
+!data/uploads/.gitkeep
+*.gpickle
+.pytest_cache/
+*.egg-info/
