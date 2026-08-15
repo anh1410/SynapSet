@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pdfplumber
 from docx import Document as DocxDocument
+from pptx import Presentation
 from pypdf import PdfReader
 
 
@@ -31,14 +32,43 @@ def extract_text_from_docx(path: str) -> str:
     return "\n".join(p.text for p in doc.paragraphs if p.text.strip())
 
 
+def extract_text_from_pptx(path: str) -> str:
+    """Extract slide title/body text and speaker notes, in slide order."""
+    prs = Presentation(path)
+    slides_text: list[str] = []
+
+    for slide in prs.slides:
+        parts: list[str] = []
+        for shape in slide.shapes:
+            if shape.has_text_frame and shape.text_frame.text.strip():
+                parts.append(shape.text_frame.text.strip())
+            elif shape.has_table:
+                for row in shape.table.rows:
+                    parts.append(" | ".join(cell.text.strip() for cell in row.cells))
+        if slide.has_notes_slide:
+            notes = slide.notes_slide.notes_text_frame.text.strip()
+            if notes:
+                parts.append(f"Notes: {notes}")
+        slides_text.append("\n".join(parts))
+
+    return "\n\n".join(s for s in slides_text if s)
+
+
 def extract_text(path: str) -> str:
     suffix = Path(path).suffix.lower()
     if suffix == ".pdf":
         return extract_text_from_pdf(path)
     if suffix == ".docx":
         return extract_text_from_docx(path)
+    if suffix == ".pptx":
+        return extract_text_from_pptx(path)
     if suffix == ".txt":
         return Path(path).read_text(encoding="utf-8")
+    if suffix == ".ppt":
+        raise ValueError(
+            "Legacy .ppt is not directly supported — convert to .pptx first "
+            "(e.g. open and Save As in PowerPoint)."
+        )
     raise ValueError(f"Unsupported file type: {suffix}")
 
 
