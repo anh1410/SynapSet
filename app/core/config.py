@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     # Google Gemini
     google_api_key: str = ""
     embedding_model: str = "gemini-embedding-001"
-    generation_model: str = "gemini-flash-latest"
+    generation_model: str = "gemini-flash-lite-latest"
 
     # Neo4j (optional; falls back to NetworkX in-memory/pickle if unset)
     neo4j_uri: str = ""
