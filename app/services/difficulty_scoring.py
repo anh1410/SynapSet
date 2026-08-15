@@ -51,8 +51,10 @@ def _topic_depth(node_id: str, prereq_graph: nx.DiGraph) -> int:
     subgraph = prereq_graph.subgraph(ancestors | {node_id})
     try:
         return nx.dag_longest_path_length(subgraph)
-    except nx.NetworkXError:
-        return 0  # cyclic subgraph — shouldn't happen, but don't crash on it
+    except nx.NetworkXUnfeasible:
+        # LLM-extracted relations aren't guaranteed acyclic (e.g. A prereq-of B
+        # from one chunk, B prereq-of A from another) — degrade gracefully.
+        return 0
 
 
 def extract_features(question: Question, graph_store: KnowledgeGraphStore) -> dict[str, float]:
