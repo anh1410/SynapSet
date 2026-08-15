@@ -36,3 +36,6 @@ ortools==9.15.6755
 
 # Document export (Phase 6)
 reportlab==5.0.0
+
+# Testing
+pytest==9.1.1
