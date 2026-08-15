@@ -37,6 +37,12 @@ class Settings(BaseSettings):
     # Question bank storage
     question_bank_path: str = str(BASE_DIR / "data" / "question_bank.json")
 
+    # Uploaded document registry
+    document_store_path: str = str(BASE_DIR / "data" / "documents.json")
+
+    # Saved exam paper blueprints
+    paper_store_path: str = str(BASE_DIR / "data" / "paper_blueprints.json")
+
     # Paper export output
     export_dir: str = str(BASE_DIR / "data" / "exports")
 

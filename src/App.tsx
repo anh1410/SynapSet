@@ -21,6 +21,18 @@ export type Page =
 export default function App() {
   const [page, setPage] = useState<Page>("overview");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [examSeedIds, setExamSeedIds] = useState<string[]>([]);
+  const [activeBlueprintId, setActiveBlueprintId] = useState<string | null>(null);
+
+  const goToExamBuilder = (questionIds: string[]) => {
+    setExamSeedIds(questionIds);
+    setPage("exam");
+  };
+
+  const goToReview = (blueprintId: string) => {
+    setActiveBlueprintId(blueprintId);
+    setPage("review");
+  };
 
   return (
     <div className="flex h-screen overflow-hidden bg-secondary/40">
@@ -40,9 +52,11 @@ export default function App() {
             {page === "upload" && <UploadPage />}
             {page === "analysis" && <AnalysisPage />}
             {page === "generate" && <GeneratePage />}
-            {page === "bank" && <BankPage />}
-            {page === "exam" && <ExamBuilderPage />}
-            {page === "review" && <ReviewExportPage />}
+            {page === "bank" && <BankPage onSendToExam={goToExamBuilder} />}
+            {page === "exam" && <ExamBuilderPage seedQuestionIds={examSeedIds} onSaved={goToReview} />}
+            {page === "review" && (
+              <ReviewExportPage blueprintId={activeBlueprintId} onNavigate={setPage} onSelectBlueprint={goToReview} />
+            )}
           </div>
         </main>
       </div>

@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.core.graph_store import get_graph_store
@@ -23,7 +23,7 @@ class GenerateQuestionsRequest(BaseModel):
     question_type: QuestionType = QuestionType.SHORT_ANSWER
     course_outcomes: list[CourseOutcome] | None = None
     check_duplicates: bool = True
-    save_to_bank: bool = True
+    save_to_bank: bool = False
 
 
 class GeneratedQuestionResult(BaseModel):
@@ -39,7 +39,8 @@ class GenerateQuestionsResponse(BaseModel):
 @router.post("/generate", response_model=GenerateQuestionsResponse)
 def generate(request: GenerateQuestionsRequest) -> GenerateQuestionsResponse:
     """RAG-generate questions for a topic, score their difficulty, and flag duplicates
-    against the existing question bank."""
+    against the existing question bank. Defaults to a preview (not saved) — pass
+    save_to_bank=true, or POST the chosen question(s) to /questions afterward."""
     graph_store = get_graph_store()
     bank = get_question_bank()
 
@@ -56,6 +57,7 @@ def generate(request: GenerateQuestionsRequest) -> GenerateQuestionsResponse:
     results = []
     for q in questions:
         difficulty = score_difficulty(q, graph_store)
+        q.difficulty_score = difficulty.score
         matches = find_duplicates(q, bank.list()) if request.check_duplicates else []
         results.append(GeneratedQuestionResult(question=q, difficulty=difficulty, duplicate_matches=matches))
         if request.save_to_bank:
@@ -83,3 +85,17 @@ def check_duplicates(request: CheckDuplicatesRequest) -> CheckDuplicatesResponse
 @router.get("", response_model=list[Question])
 def list_questions() -> list[Question]:
     return get_question_bank().list()
+
+
+@router.post("", response_model=Question)
+def save_question(question: Question) -> Question:
+    """Persist a question the user has reviewed (e.g. a generation preview they approved)."""
+    get_question_bank().add(question)
+    return question
+
+
+@router.delete("/{question_id}")
+def delete_question(question_id: str) -> dict:
+    if not get_question_bank().remove(question_id):
+        raise HTTPException(status_code=404, detail="Question not found")
+    return {"deleted": question_id}

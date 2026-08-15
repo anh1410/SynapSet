@@ -34,6 +34,13 @@ class QuestionBank:
             self.questions[q.id] = q
         self.save()
 
+    def remove(self, question_id: str) -> bool:
+        if question_id in self.questions:
+            del self.questions[question_id]
+            self.save()
+            return True
+        return False
+
     def list(self) -> list[Question]:
         return list(self.questions.values())
 

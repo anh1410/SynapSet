@@ -9,5 +9,8 @@ data/uploads/*
 data/exports/
 *.gpickle
 question_bank.json
+documents.json
+paper_blueprints.json
 .pytest_cache/
 *.egg-info/
+tsconfig.tsbuildinfo
