@@ -17,12 +17,13 @@ neo4j==5.24.0
 pdfplumber==0.11.4
 pypdf==5.0.1
 python-docx==1.1.2
+python-pptx==1.0.2
 
-# NLP / entity extraction (Phase 2.2)
-spacy==3.7.6
+# LLM extraction & embeddings (Phase 2.2, Phase 3) - Google Gemini
+google-genai==0.7.0
+tenacity==9.0.0
 
-# Embeddings / RAG (Phase 3)
-openai==1.51.0
+# Duplicate detection (Phase 4)
 sentence-transformers==3.1.1
 
 # Difficulty scoring (Phase 5)
