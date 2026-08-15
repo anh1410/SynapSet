@@ -1,10 +1,16 @@
 import pickle
+import re
 from functools import lru_cache
 from pathlib import Path
 
 import networkx as nx
 
 from app.core.config import get_settings
+
+
+def normalize_topic_name(name: str) -> str:
+    """Collapse a topic name to a stable node id (lowercase, single-spaced, alnum)."""
+    return re.sub(r"[^a-z0-9]+", "_", name.strip().lower()).strip("_")
 
 
 class KnowledgeGraphStore:

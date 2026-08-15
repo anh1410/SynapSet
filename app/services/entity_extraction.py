@@ -1,10 +1,10 @@
-import re
 import warnings
 
+import httpx
 from google.genai import errors, types
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
-from app.core.graph_store import KnowledgeGraphStore
+from app.core.graph_store import KnowledgeGraphStore, normalize_topic_name
 from app.core.llm import get_genai_client
 from app.core.config import get_settings
 from app.schemas.extraction import ExtractionResult
@@ -24,13 +24,8 @@ TEXT:
 {text}"""
 
 
-def _normalize_name(name: str) -> str:
-    """Collapse a topic name to a stable node id (lowercase, single-spaced, alnum)."""
-    return re.sub(r"[^a-z0-9]+", "_", name.strip().lower()).strip("_")
-
-
 @retry(
-    retry=retry_if_exception_type((errors.ServerError, errors.APIError)),
+    retry=retry_if_exception_type((errors.ServerError, errors.APIError, httpx.TransportError)),
     stop=stop_after_attempt(4),
     wait=wait_exponential(multiplier=2, min=2, max=30),
     reraise=True,
@@ -66,7 +61,7 @@ def merge_into_graph(
 ) -> None:
     """Merge extracted topics/relations into the graph store, deduping by normalized name."""
     for topic in result.topics:
-        node_id = _normalize_name(topic.name)
+        node_id = normalize_topic_name(topic.name)
         if not node_id:
             continue
         if graph_store.graph.has_node(node_id):
@@ -79,8 +74,8 @@ def merge_into_graph(
         )
 
     for relation in result.relations:
-        source_id = _normalize_name(relation.source)
-        target_id = _normalize_name(relation.target)
+        source_id = normalize_topic_name(relation.source)
+        target_id = normalize_topic_name(relation.target)
         if not source_id or not target_id:
             continue
         if not graph_store.graph.has_node(source_id):
