@@ -105,5 +105,18 @@ def chunk_text(
 
 
 def extract_and_chunk(path: str, chunk_size: int = 800, overlap: int = 150) -> list[TextChunk]:
+    """Small overlapping chunks, sized for embedding/RAG retrieval (Phase 3)."""
+    text = extract_text(path)
+    return chunk_text(text, source_document=Path(path).name, chunk_size=chunk_size, overlap=overlap)
+
+
+def extract_and_chunk_for_extraction(
+    path: str, chunk_size: int = 4000, overlap: int = 0
+) -> list[TextChunk]:
+    """Large, mostly non-overlapping chunks for LLM graph extraction (Phase 2.2).
+
+    Bigger chunks mean fewer LLM calls per document and let the model see
+    relationships that span what would otherwise be separate retrieval chunks.
+    """
     text = extract_text(path)
     return chunk_text(text, source_document=Path(path).name, chunk_size=chunk_size, overlap=overlap)
