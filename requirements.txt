@@ -1,6 +1,7 @@
 # Core
-fastapi==0.115.0
+fastapi==0.141.1
 uvicorn[standard]==0.30.6
+python-multipart==0.0.32
 pydantic==2.9.2
 pydantic-settings==2.5.2
 python-dotenv==1.0.1
@@ -34,4 +35,4 @@ shap==0.52.0
 ortools==9.15.6755
 
 # Document export (Phase 6)
-reportlab==4.2.2
+reportlab==5.0.0

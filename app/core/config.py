@@ -34,6 +34,12 @@ class Settings(BaseSettings):
     # Graph storage (used when Neo4j is not configured)
     graph_store_path: str = str(BASE_DIR / "data" / "knowledge_graph.gpickle")
 
+    # Question bank storage
+    question_bank_path: str = str(BASE_DIR / "data" / "question_bank.json")
+
+    # Paper export output
+    export_dir: str = str(BASE_DIR / "data" / "exports")
+
 
 @lru_cache
 def get_settings() -> Settings:
