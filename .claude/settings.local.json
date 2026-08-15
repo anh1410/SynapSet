@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npm create *)"
+      "Bash(npm create *)",
+      "Bash(powershell -Command \"Copy-Item 'C:\\\\Users\\\\Anagha\\\\Downloads\\\\Project_Synopsis_Restructured \\(1\\).docx' 'C:\\\\Users\\\\Anagha\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\E--SynapSet\\\\bf538f4d-d11c-4144-9c8c-d7f19522e098\\\\scratchpad\\\\synopsis.docx'\")",
+      "Bash(Out-String)"
     ]
   }
 }
