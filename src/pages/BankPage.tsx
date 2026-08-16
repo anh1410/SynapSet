@@ -26,14 +26,24 @@ const difficultyVariant: Record<DifficultyBucket, "success" | "warning" | "destr
   Hard: "destructive",
 };
 
-export function BankPage({ onSendToExam }: { onSendToExam: (questionIds: string[]) => void }) {
+export function BankPage({
+  onSendToExam,
+  initialSearch,
+}: {
+  onSendToExam: (questionIds: string[]) => void;
+  initialSearch?: string;
+}) {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [topics, setTopics] = useState<GraphNode[]>([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(initialSearch ?? "");
   const [topicFilter, setTopicFilter] = useState("all");
   const [difficultyFilter, setDifficultyFilter] = useState("all");
   const [selected, setSelected] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (initialSearch !== undefined) setSearch(initialSearch);
+  }, [initialSearch]);
 
   useEffect(() => {
     Promise.all([fetchQuestions().then(setQuestions), fetchGraph().then((g) => setTopics(g.nodes))]).finally(() =>
