@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { Network, AlertTriangle, Info, Share2 } from "lucide-react";
+import { Network, AlertTriangle, Info, Share2, Wand2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Tooltip } from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
-import { fetchGraph, type GraphEdge, type GraphNode } from "@/lib/api";
+import { dedupeTopics, fetchGraph, type GraphEdge, type GraphNode } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 function computeLayout(nodes: GraphNode[]): Record<string, { x: number; y: number }> {
@@ -25,15 +26,37 @@ export function AnalysisPage() {
   const [edges, setEdges] = useState<GraphEdge[]>([]);
   const [loading, setLoading] = useState(true);
   const [hovered, setHovered] = useState<string | null>(null);
+  const [deduping, setDeduping] = useState(false);
+  const [dedupeMessage, setDedupeMessage] = useState<string | null>(null);
 
-  useEffect(() => {
+  const loadGraph = () => {
     fetchGraph()
       .then((g) => {
         setNodes(g.nodes);
         setEdges(g.edges);
       })
       .finally(() => setLoading(false));
-  }, []);
+  };
+
+  useEffect(loadGraph, []);
+
+  const handleDedupe = async () => {
+    setDeduping(true);
+    setDedupeMessage(null);
+    try {
+      const result = await dedupeTopics();
+      setDedupeMessage(
+        result.merged_groups === 0
+          ? "No duplicate topics found."
+          : `Merged ${result.nodes_removed} duplicate topic${result.nodes_removed !== 1 ? "s" : ""} into ${result.merged_groups} canonical topic${result.merged_groups !== 1 ? "s" : ""}.`
+      );
+      loadGraph();
+    } catch (e) {
+      setDedupeMessage(e instanceof Error ? e.message : "Cleanup failed");
+    } finally {
+      setDeduping(false);
+    }
+  };
 
   const positions = useMemo(() => computeLayout(nodes), [nodes]);
   const maxImportance = Math.max(...nodes.map((n) => n.importance_score), 0.0001);
@@ -61,12 +84,20 @@ export function AnalysisPage() {
     <div className="space-y-6">
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
         <Card className="lg:col-span-3">
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <Network className="h-4 w-4 text-primary" />
-              <CardTitle>Knowledge Graph</CardTitle>
+          <CardHeader className="flex-row items-start justify-between space-y-0">
+            <div>
+              <div className="flex items-center gap-2">
+                <Network className="h-4 w-4 text-primary" />
+                <CardTitle>Knowledge Graph</CardTitle>
+              </div>
+              <CardDescription>Relationships between topics inferred from your materials</CardDescription>
             </div>
-            <CardDescription>Relationships between topics inferred from your materials</CardDescription>
+            <div className="flex flex-col items-end gap-1">
+              <Button variant="outline" size="sm" onClick={handleDedupe} disabled={deduping}>
+                <Wand2 className="h-3.5 w-3.5" /> {deduping ? "Cleaning up..." : "Clean up duplicates"}
+              </Button>
+              {dedupeMessage && <p className="text-[11px] text-muted-foreground">{dedupeMessage}</p>}
+            </div>
           </CardHeader>
           <CardContent>
             <div className="relative h-96 w-full overflow-hidden rounded-lg border border-border bg-grid bg-secondary/20">

@@ -202,6 +202,16 @@ export function ingestDocument(file: File, category: DocumentCategory, courseOut
   return apiFetch<IngestResult>("/graph/ingest", { method: "POST", body: form });
 }
 
+export interface DedupeTopicsResult {
+  merged_groups: number;
+  nodes_removed: number;
+  questions_updated: number;
+}
+
+export function dedupeTopics() {
+  return apiFetch<DedupeTopicsResult>("/graph/dedupe-topics", { method: "POST" });
+}
+
 // ---------- Questions ----------
 
 export interface GenerateQuestionsParams {
