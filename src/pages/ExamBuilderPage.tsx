@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { FileStack, Wand2, Clock, Hash, PieChart, ListChecks, Plus, Minus, AlertTriangle, Save } from "lucide-react";
+import { FileStack, Wand2, Clock, Hash, PieChart, ListChecks, Plus, Minus, AlertTriangle, Save, Sparkles } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,10 +12,12 @@ import {
   difficultyBucket,
   fetchGraph,
   fetchQuestions,
+  generateQuestions,
   optimizePaper,
   type BloomLevel,
   type GraphNode,
   type Question,
+  type QuestionType,
 } from "@/lib/api";
 
 const bloomColors: Record<BloomLevel, string> = {
@@ -28,6 +30,17 @@ const bloomColors: Record<BloomLevel, string> = {
 };
 
 const defaultBloomMix: Record<BloomLevel, number> = { 1: 10, 2: 25, 3: 30, 4: 20, 5: 10, 6: 5 };
+
+// A reasonable marks/type tier per Bloom level for auto-generated candidates —
+// the optimizer picks which ones actually make it into the paper.
+const bloomTier: Record<BloomLevel, { marks: number; type: QuestionType }> = {
+  1: { marks: 1, type: "mcq" },
+  2: { marks: 5, type: "short_answer" },
+  3: { marks: 5, type: "short_answer" },
+  4: { marks: 8, type: "short_answer" },
+  5: { marks: 10, type: "long_answer" },
+  6: { marks: 10, type: "long_answer" },
+};
 
 export function ExamBuilderPage({
   seedQuestionIds,
@@ -48,6 +61,8 @@ export function ExamBuilderPage({
   const [status, setStatus] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [generateNew, setGenerateNew] = useState(true);
+  const [progress, setProgress] = useState<string | null>(null);
 
   const isSeeded = seedQuestionIds.length > 0;
 
@@ -75,16 +90,60 @@ export function ExamBuilderPage({
 
   const bloomSum = BLOOM_LEVELS.reduce((s, b) => s + bloomMix[b], 0);
 
+  const activeBloomLevels = BLOOM_LEVELS.filter((b) => bloomMix[b] > 0);
+
+  const generateCandidatesForTopics = async (topicIds: string[]): Promise<Question[]> => {
+    const topicNames = topicIds
+      .map((id) => topics.find((t) => t.id === id)?.name)
+      .filter((name): name is string => Boolean(name));
+
+    const jobs = topicNames.flatMap((topicName) =>
+      activeBloomLevels.map((bloom) => ({ topicName, bloom }))
+    );
+
+    const generated: Question[] = [];
+    for (let i = 0; i < jobs.length; i++) {
+      const { topicName, bloom } = jobs[i];
+      setProgress(`Generating question ${i + 1} of ${jobs.length}...`);
+      const tier = bloomTier[bloom];
+      try {
+        const { results } = await generateQuestions({
+          topic: topicName,
+          num_questions: 1,
+          bloom_level: bloom,
+          marks: tier.marks,
+          question_type: tier.type,
+          check_duplicates: false,
+          save_to_bank: true,
+        });
+        if (results[0]) generated.push(results[0].question);
+      } catch {
+        // one topic/bloom combo failing shouldn't abort the whole batch
+      }
+    }
+    setProgress(null);
+    return generated;
+  };
+
   const runOptimize = async () => {
     setRunning(true);
     setStatus(null);
     setSelected(null);
     try {
+      let pool = candidatePool;
+      if (!isSeeded && generateNew && selectedTopics.length > 0) {
+        const newQuestions = await generateCandidatesForTopics(selectedTopics);
+        if (newQuestions.length > 0) {
+          setAllQuestions((prev) => [...prev, ...newQuestions]);
+          pool = [...pool, ...newQuestions];
+        }
+      }
+
       const weights: Partial<Record<BloomLevel, number>> = {};
       BLOOM_LEVELS.forEach((b) => {
         if (bloomMix[b] > 0) weights[b] = bloomMix[b] / (bloomSum || 1);
       });
-      const candidateIds = candidatePool.map((q) => q.id);
+      const candidateIds = pool.map((q) => q.id);
       const result = await optimizePaper({ total_marks: totalMarks, bloom_distribution: { weights } }, candidateIds);
       setStatus(result.status);
       if (result.status === "OPTIMAL" || result.status === "FEASIBLE") {
@@ -197,13 +256,28 @@ export function ExamBuilderPage({
                   </label>
                 ))}
               </div>
+              <label className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-1 text-xs text-foreground">
+                <Checkbox checked={generateNew} onCheckedChange={setGenerateNew} />
+                <Sparkles className="h-3.5 w-3.5 text-primary" />
+                Generate new questions for these topics before building
+              </label>
             </div>
           )}
 
-          <Button className="w-full" onClick={runOptimize} disabled={running || candidatePool.length === 0}>
-            <Wand2 className="h-4 w-4" /> {running ? "Optimizing..." : "Auto-generate Paper"}
+          <Button
+            className="w-full"
+            onClick={runOptimize}
+            disabled={
+              running ||
+              (isSeeded ? candidatePool.length === 0 : selectedTopics.length === 0 && !generateNew)
+            }
+          >
+            <Wand2 className="h-4 w-4" /> {progress ?? (running ? "Optimizing..." : "Auto-generate Paper")}
           </Button>
-          {candidatePool.length === 0 && (
+          {!isSeeded && selectedTopics.length === 0 && (
+            <p className="text-xs text-muted-foreground">Select at least one topic.</p>
+          )}
+          {isSeeded && candidatePool.length === 0 && (
             <p className="text-xs text-muted-foreground">No questions available for the current selection.</p>
           )}
         </CardContent>
