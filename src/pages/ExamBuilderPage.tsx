@@ -63,6 +63,7 @@ export function ExamBuilderPage({
   const [saving, setSaving] = useState(false);
   const [generateNew, setGenerateNew] = useState(true);
   const [progress, setProgress] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const isSeeded = seedQuestionIds.length > 0;
 
@@ -91,17 +92,26 @@ export function ExamBuilderPage({
   const bloomSum = BLOOM_LEVELS.reduce((s, b) => s + bloomMix[b], 0);
 
   const activeBloomLevels = BLOOM_LEVELS.filter((b) => bloomMix[b] > 0);
+  const MAX_GENERATED = 12;
 
-  const generateCandidatesForTopics = async (topicIds: string[]): Promise<Question[]> => {
+  const generateCandidatesForTopics = async (
+    topicIds: string[]
+  ): Promise<{ generated: Question[]; failures: number }> => {
     const topicNames = topicIds
       .map((id) => topics.find((t) => t.id === id)?.name)
       .filter((name): name is string => Boolean(name));
 
-    const jobs = topicNames.flatMap((topicName) =>
-      activeBloomLevels.map((bloom) => ({ topicName, bloom }))
-    );
+    // One question per topic, rotating through the active Bloom levels so the
+    // mix still gets some variety — capped so this can't explode into dozens
+    // of real API calls when many topics are selected.
+    const levels = activeBloomLevels.length > 0 ? activeBloomLevels : ([2] as BloomLevel[]);
+    const jobs = topicNames.slice(0, MAX_GENERATED).map((topicName, i) => ({
+      topicName,
+      bloom: levels[i % levels.length],
+    }));
 
     const generated: Question[] = [];
+    let failures = 0;
     for (let i = 0; i < jobs.length; i++) {
       const { topicName, bloom } = jobs[i];
       setProgress(`Generating question ${i + 1} of ${jobs.length}...`);
@@ -117,26 +127,41 @@ export function ExamBuilderPage({
           save_to_bank: true,
         });
         if (results[0]) generated.push(results[0].question);
+        else failures++;
       } catch {
-        // one topic/bloom combo failing shouldn't abort the whole batch
+        failures++;
       }
     }
     setProgress(null);
-    return generated;
+    return { generated, failures };
   };
 
   const runOptimize = async () => {
     setRunning(true);
     setStatus(null);
     setSelected(null);
+    setErrorMessage(null);
     try {
       let pool = candidatePool;
       if (!isSeeded && generateNew && selectedTopics.length > 0) {
-        const newQuestions = await generateCandidatesForTopics(selectedTopics);
+        const { generated: newQuestions, failures } = await generateCandidatesForTopics(selectedTopics);
         if (newQuestions.length > 0) {
           setAllQuestions((prev) => [...prev, ...newQuestions]);
           pool = [...pool, ...newQuestions];
         }
+        if (failures > 0 && newQuestions.length === 0) {
+          setStatus("ERROR");
+          setErrorMessage(
+            `Question generation failed for all ${failures} attempt${failures !== 1 ? "s" : ""}. The Gemini API may be rate-limited or out of quota — wait a bit and try again, or uncheck "Generate new questions" to build from the existing bank only.`
+          );
+          return;
+        }
+      }
+
+      if (pool.length === 0) {
+        setStatus("ERROR");
+        setErrorMessage("No candidate questions available. Select topics with existing questions, or enable generation.");
+        return;
       }
 
       const weights: Partial<Record<BloomLevel, number>> = {};
@@ -151,6 +176,7 @@ export function ExamBuilderPage({
       }
     } catch (e) {
       setStatus("ERROR");
+      setErrorMessage(e instanceof Error ? e.message : "Unknown error");
       setSelected(null);
     } finally {
       setRunning(false);
@@ -259,7 +285,7 @@ export function ExamBuilderPage({
               <label className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-1 text-xs text-foreground">
                 <Checkbox checked={generateNew} onCheckedChange={setGenerateNew} />
                 <Sparkles className="h-3.5 w-3.5 text-primary" />
-                Generate new questions for these topics before building
+                Generate 1 new question per selected topic before building
               </label>
             </div>
           )}
@@ -304,7 +330,7 @@ export function ExamBuilderPage({
               <p className="max-w-sm text-xs text-muted-foreground">
                 {status === "INFEASIBLE"
                   ? "Try lowering total marks, widening the Bloom mix, or including more topics — there aren't enough matching questions in the bank."
-                  : "The optimizer request failed. Try again."}
+                  : errorMessage ?? "The request failed. Try again."}
               </p>
             </CardContent>
           </Card>
