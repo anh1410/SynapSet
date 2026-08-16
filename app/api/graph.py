@@ -12,6 +12,7 @@ from app.core.question_bank import get_question_bank
 from app.schemas.document import DocumentCategory, UploadedDocument
 from app.services.document_extraction import extract_and_chunk, extract_and_chunk_for_extraction
 from app.services.entity_extraction import extract_from_chunk, merge_into_graph
+from app.services.topic_dedup import merge_duplicate_topics
 from app.services.vector_indexing import index_chunks
 
 router = APIRouter(prefix="/api/v1/graph", tags=["graph"])
@@ -153,3 +154,17 @@ def get_graph() -> GraphResponse:
     ]
 
     return GraphResponse(nodes=nodes, edges=edges)
+
+
+class DedupeTopicsResponse(BaseModel):
+    merged_groups: int
+    nodes_removed: int
+    questions_updated: int
+
+
+@router.post("/dedupe-topics", response_model=DedupeTopicsResponse)
+def dedupe_topics() -> DedupeTopicsResponse:
+    """Merge near-duplicate topic nodes (e.g. singular/plural variants from
+    repeated ingestion) into a single canonical node."""
+    result = merge_duplicate_topics(get_graph_store(), get_question_bank())
+    return DedupeTopicsResponse(**result)
