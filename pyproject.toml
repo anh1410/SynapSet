@@ -1,0 +1,7 @@
+[tool.pytest.ini_options]
+markers = [
+    "llm: hits the real Gemini API (network, uses quota) - excluded by default, run with `-m llm`",
+]
+addopts = "-m \"not llm\""
+testpaths = ["tests"]
+pythonpath = ["."]
