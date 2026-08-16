@@ -31,16 +31,33 @@ const bloomColors: Record<BloomLevel, string> = {
 
 const defaultBloomMix: Record<BloomLevel, number> = { 1: 10, 2: 25, 3: 30, 4: 20, 5: 10, 6: 5 };
 
-// A reasonable marks/type tier per Bloom level for auto-generated candidates —
-// the optimizer picks which ones actually make it into the paper.
-const bloomTier: Record<BloomLevel, { marks: number; type: QuestionType }> = {
-  1: { marks: 1, type: "mcq" },
-  2: { marks: 5, type: "short_answer" },
-  3: { marks: 5, type: "short_answer" },
-  4: { marks: 8, type: "short_answer" },
-  5: { marks: 10, type: "long_answer" },
-  6: { marks: 10, type: "long_answer" },
+// Question format per Bloom level for auto-generated candidates (marks are
+// computed separately, see pickMarksAndCount, so the total is actually
+// reachable rather than a fixed per-level value that may never sum to target).
+const questionTypeForBloom: Record<BloomLevel, QuestionType> = {
+  1: "mcq",
+  2: "short_answer",
+  3: "short_answer",
+  4: "short_answer",
+  5: "long_answer",
+  6: "long_answer",
 };
+
+// The optimizer requires candidate marks to sum to EXACTLY total_marks, so pick
+// a per-question marks value that evenly divides the target within [minCount,
+// maxCount] questions — that guarantees the generated batch alone can hit the
+// total exactly, rather than hoping a random mix of marks happens to work.
+function pickMarksAndCount(totalMarks: number, minCount: number, maxCount: number) {
+  const MARKS_OPTIONS = [10, 8, 6, 5, 4, 2, 1];
+  for (const marks of MARKS_OPTIONS) {
+    const count = totalMarks / marks;
+    if (Number.isInteger(count) && count >= minCount && count <= maxCount) {
+      return { marks, count };
+    }
+  }
+  const count = Math.min(maxCount, Math.max(minCount, Math.round(totalMarks / 5)));
+  return { marks: 5, count };
+}
 
 export function ExamBuilderPage({
   seedQuestionIds,
@@ -92,7 +109,7 @@ export function ExamBuilderPage({
   const bloomSum = BLOOM_LEVELS.reduce((s, b) => s + bloomMix[b], 0);
 
   const activeBloomLevels = BLOOM_LEVELS.filter((b) => bloomMix[b] > 0);
-  const MAX_GENERATED = 12;
+  const MAX_GENERATED = 20;
 
   const generateCandidatesForTopics = async (
     topicIds: string[]
@@ -100,14 +117,24 @@ export function ExamBuilderPage({
     const topicNames = topicIds
       .map((id) => topics.find((t) => t.id === id)?.name)
       .filter((name): name is string => Boolean(name));
+    if (topicNames.length === 0) return { generated: [], failures: 0 };
 
-    // One question per topic, rotating through the active Bloom levels so the
-    // mix still gets some variety — capped so this can't explode into dozens
-    // of real API calls when many topics are selected.
     const levels = activeBloomLevels.length > 0 ? activeBloomLevels : ([2] as BloomLevel[]);
-    const jobs = topicNames.slice(0, MAX_GENERATED).map((topicName, i) => ({
-      topicName,
-      bloom: levels[i % levels.length],
+
+    // Pick a marks-per-question value that evenly divides total_marks, so the
+    // generated batch alone can sum to exactly the target (the optimizer
+    // requires an exact match, not just "close enough").
+    const { marks: marksPerQuestion, count: jobCount } = pickMarksAndCount(
+      totalMarks,
+      topicNames.length,
+      MAX_GENERATED
+    );
+
+    // Cycle topic-major then Bloom-level-major so every topic is covered at
+    // every active level before repeating.
+    const jobs = Array.from({ length: jobCount }, (_, i) => ({
+      topicName: topicNames[i % topicNames.length],
+      bloom: levels[Math.floor(i / topicNames.length) % levels.length],
     }));
 
     const generated: Question[] = [];
@@ -115,14 +142,13 @@ export function ExamBuilderPage({
     for (let i = 0; i < jobs.length; i++) {
       const { topicName, bloom } = jobs[i];
       setProgress(`Generating question ${i + 1} of ${jobs.length}...`);
-      const tier = bloomTier[bloom];
       try {
         const { results } = await generateQuestions({
           topic: topicName,
           num_questions: 1,
           bloom_level: bloom,
-          marks: tier.marks,
-          question_type: tier.type,
+          marks: marksPerQuestion,
+          question_type: questionTypeForBloom[bloom],
           check_duplicates: false,
           save_to_bank: true,
         });
@@ -285,7 +311,7 @@ export function ExamBuilderPage({
               <label className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-1 text-xs text-foreground">
                 <Checkbox checked={generateNew} onCheckedChange={setGenerateNew} />
                 <Sparkles className="h-3.5 w-3.5 text-primary" />
-                Generate 1 new question per selected topic before building
+                Generate new questions for these topics before building
               </label>
             </div>
           )}
