@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState } from "react";
-import { FileStack, Clock, Lock, LockOpen, Pencil, Trash2, XCircle, CalendarClock } from "lucide-react";
+import { FileStack, Clock, Lock, LockOpen, Pencil, Trash2, XCircle, CalendarClock, BarChart3 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,7 +21,7 @@ const bucketVariant: Record<ExamBucket, "success" | "accent" | "secondary" | "ou
   closed: "outline",
 };
 
-export function ExamsPage({ onEdit }: { onEdit: (examId: string) => void }) {
+export function ExamsPage({ onEdit, onViewResults }: { onEdit: (examId: string) => void; onViewResults: (examId: string) => void }) {
   const [exams, setExams] = useState<Exam[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -124,6 +124,11 @@ export function ExamsPage({ onEdit }: { onEdit: (examId: string) => void }) {
                       <Button size="sm" variant="outline" onClick={() => onEdit(exam.id)}>
                         <Pencil className="h-3.5 w-3.5" /> Edit
                       </Button>
+                      {(exam.bucket === "live" || exam.bucket === "closed") && (
+                        <Button size="sm" variant="outline" onClick={() => onViewResults(exam.id)}>
+                          <BarChart3 className="h-3.5 w-3.5" /> Results
+                        </Button>
+                      )}
                       {exam.bucket !== "closed" && exam.bucket !== "draft" && (
                         <Button size="sm" variant="ghost" onClick={() => handleClose(exam.id)} disabled={busyId === exam.id}>
                           <XCircle className="h-3.5 w-3.5" /> Close

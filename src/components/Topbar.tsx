@@ -13,6 +13,7 @@ const titles: Record<Page, { title: string; subtitle: string }> = {
   bank: { title: "Question Bank", subtitle: "Browse and manage tagged questions" },
   exam: { title: "Exam Builder", subtitle: "Add questions one at a time and schedule your quiz" },
   exams: { title: "Exams", subtitle: "Every quiz you've built — upcoming, live, and closed" },
+  results: { title: "Results", subtitle: "Auto-graded scores as students submit" },
 };
 
 function initialsFor(name: string): string {

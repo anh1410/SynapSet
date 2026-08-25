@@ -15,6 +15,7 @@ question_bank.json
 documents.json
 exams.json
 teachers.json
+submissions.json
 paper_blueprints.json
 .pytest_cache/
 *.egg-info/

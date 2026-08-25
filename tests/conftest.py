@@ -63,6 +63,7 @@ def api_client(tmp_path, monkeypatch):
     monkeypatch.setenv("QUESTION_BANK_PATH", str(tmp_path / "bank.json"))
     monkeypatch.setenv("DOCUMENT_STORE_PATH", str(tmp_path / "documents.json"))
     monkeypatch.setenv("EXAM_STORE_PATH", str(tmp_path / "exams.json"))
+    monkeypatch.setenv("SUBMISSION_STORE_PATH", str(tmp_path / "submissions.json"))
     monkeypatch.setenv("TEACHER_STORE_PATH", str(tmp_path / "teachers.json"))
     monkeypatch.setenv("CHROMA_PERSIST_DIR", str(tmp_path / "chroma"))
     monkeypatch.setenv("UPLOAD_DIR", str(tmp_path / "uploads"))
@@ -72,6 +73,7 @@ def api_client(tmp_path, monkeypatch):
     from app.core.exam_store import get_exam_store
     from app.core.graph_store import get_graph_store
     from app.core.question_bank import get_question_bank
+    from app.core.submission_store import get_submission_store
     from app.core.teacher_store import get_teacher_store
     from app.core.vector_store import get_chroma_client
 
@@ -81,6 +83,7 @@ def api_client(tmp_path, monkeypatch):
         get_question_bank,
         get_document_store,
         get_exam_store,
+        get_submission_store,
         get_teacher_store,
         get_chroma_client,
     )

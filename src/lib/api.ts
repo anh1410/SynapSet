@@ -318,6 +318,34 @@ export function deleteExam(id: string) {
   return apiFetch<{ deleted: string }>(`/exams/${id}`, { method: "DELETE" });
 }
 
+// ---------- Submissions (results) ----------
+
+export interface GradedAnswer {
+  question_id: string;
+  question_type: QuestionType;
+  auto_graded: boolean;
+  correct: boolean | null;
+  marks_awarded: number;
+  max_marks: number;
+  detail: string;
+}
+
+export interface Submission {
+  id: string;
+  exam_id: string;
+  student_name: string;
+  student_identifier: string | null;
+  answers: GradedAnswer[];
+  total_marks_awarded: number;
+  total_max_marks: number;
+  fully_auto_graded: boolean;
+  submitted_at: string;
+}
+
+export function getExamSubmissions(examId: string) {
+  return apiFetch<Submission[]>(`/exams/${examId}/submissions`);
+}
+
 // ---------- Display helpers ----------
 
 export type DifficultyBucket = Difficulty;

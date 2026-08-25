@@ -7,8 +7,10 @@ from pydantic import BaseModel
 from app.api.deps import get_current_teacher
 from app.core.exam_store import get_exam_store
 from app.core.question_bank import get_question_bank
+from app.core.submission_store import get_submission_store
 from app.schemas.exam import Exam, ExamStatus
 from app.schemas.question import Question
+from app.schemas.submission import Submission
 from app.schemas.teacher import Teacher
 
 router = APIRouter(prefix="/api/v1/exams", tags=["exams"], dependencies=[Depends(get_current_teacher)])
@@ -90,3 +92,9 @@ def delete_exam(exam_id: str, teacher: Teacher = Depends(get_current_teacher)) -
     _require_owner(exam_id, teacher)
     get_exam_store().remove(exam_id)
     return {"deleted": exam_id}
+
+
+@router.get("/{exam_id}/submissions", response_model=list[Submission])
+def list_submissions(exam_id: str, teacher: Teacher = Depends(get_current_teacher)) -> list[Submission]:
+    _require_owner(exam_id, teacher)
+    return get_submission_store().list_by_exam(exam_id)

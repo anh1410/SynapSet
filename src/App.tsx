@@ -7,6 +7,7 @@ import { AnalysisPage } from "@/pages/AnalysisPage";
 import { BankPage } from "@/pages/BankPage";
 import { ExamBuilderPage } from "@/pages/ExamBuilderPage";
 import { ExamsPage } from "@/pages/ExamsPage";
+import { ExamResultsPage } from "@/pages/ExamResultsPage";
 import { AuthPage } from "@/pages/AuthPage";
 import { AuthProvider, useAuth } from "@/lib/AuthContext";
 
@@ -16,13 +17,15 @@ export type Page =
   | "analysis"
   | "bank"
   | "exam"
-  | "exams";
+  | "exams"
+  | "results";
 
 function AppShell() {
   const [page, setPage] = useState<Page>("overview");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [examSeedIds, setExamSeedIds] = useState<string[]>([]);
   const [editExamId, setEditExamId] = useState<string | null>(null);
+  const [resultsExamId, setResultsExamId] = useState<string | null>(null);
   const [bankSearch, setBankSearch] = useState<string | undefined>(undefined);
 
   const goToExamBuilder = (questionIds: string[]) => {
@@ -45,6 +48,11 @@ function AppShell() {
 
   const goToExams = () => {
     setPage("exams");
+  };
+
+  const goToResults = (examId: string) => {
+    setResultsExamId(examId);
+    setPage("results");
   };
 
   const goToBankSearch = (query: string) => {
@@ -78,7 +86,8 @@ function AppShell() {
             {page === "exam" && (
               <ExamBuilderPage seedQuestionIds={examSeedIds} editExamId={editExamId} onSaved={goToExams} />
             )}
-            {page === "exams" && <ExamsPage onEdit={goToEditExam} />}
+            {page === "exams" && <ExamsPage onEdit={goToEditExam} onViewResults={goToResults} />}
+            {page === "results" && resultsExamId && <ExamResultsPage examId={resultsExamId} onBack={goToExams} />}
           </div>
         </main>
       </div>

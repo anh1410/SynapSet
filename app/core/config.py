@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     # Saved exams (weekly quizzes)
     exam_store_path: str = str(BASE_DIR / "data" / "exams.json")
 
+    # Graded student submissions
+    submission_store_path: str = str(BASE_DIR / "data" / "submissions.json")
+
     # Teacher accounts
     teacher_store_path: str = str(BASE_DIR / "data" / "teachers.json")
 
