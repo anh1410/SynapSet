@@ -1,6 +1,9 @@
-from fastapi import APIRouter, HTTPException
+from typing import Literal
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from app.api.deps import get_current_teacher
 from app.core.graph_store import get_graph_store
 from app.core.question_bank import get_question_bank
 from app.schemas.bloom import BloomLevel
@@ -12,7 +15,9 @@ from app.services.difficulty_scoring import score_difficulty
 from app.services.duplicate_detection import find_duplicates
 from app.services.question_generation import generate_questions
 
-router = APIRouter(prefix="/api/v1/questions", tags=["questions"])
+router = APIRouter(prefix="/api/v1/questions", tags=["questions"], dependencies=[Depends(get_current_teacher)])
+
+DifficultyBucket = Literal["Easy", "Medium", "Hard"]
 
 
 class GenerateQuestionsRequest(BaseModel):
@@ -21,6 +26,7 @@ class GenerateQuestionsRequest(BaseModel):
     bloom_level: BloomLevel = BloomLevel.UNDERSTAND
     marks: int = 5
     question_type: QuestionType = QuestionType.SHORT_ANSWER
+    target_difficulty: DifficultyBucket | None = None
     course_outcomes: list[CourseOutcome] | None = None
     check_duplicates: bool = True
     save_to_bank: bool = False
@@ -51,6 +57,7 @@ def generate(request: GenerateQuestionsRequest) -> GenerateQuestionsResponse:
         bloom_level=request.bloom_level,
         marks=request.marks,
         question_type=request.question_type,
+        target_difficulty=request.target_difficulty,
         course_outcomes=request.course_outcomes,
     )
 

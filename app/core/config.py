@@ -40,11 +40,15 @@ class Settings(BaseSettings):
     # Uploaded document registry
     document_store_path: str = str(BASE_DIR / "data" / "documents.json")
 
-    # Saved exam paper blueprints
-    paper_store_path: str = str(BASE_DIR / "data" / "paper_blueprints.json")
+    # Saved exams (weekly quizzes)
+    exam_store_path: str = str(BASE_DIR / "data" / "exams.json")
 
-    # Paper export output
-    export_dir: str = str(BASE_DIR / "data" / "exports")
+    # Teacher accounts
+    teacher_store_path: str = str(BASE_DIR / "data" / "teachers.json")
+
+    # Auth
+    jwt_secret: str = "dev-secret-change-me"
+    jwt_expire_minutes: int = 60 * 24 * 7
 
 
 @lru_cache

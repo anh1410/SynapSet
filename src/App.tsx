@@ -4,35 +4,47 @@ import { Topbar } from "@/components/Topbar";
 import { OverviewPage } from "@/pages/OverviewPage";
 import { UploadPage } from "@/pages/UploadPage";
 import { AnalysisPage } from "@/pages/AnalysisPage";
-import { GeneratePage } from "@/pages/GeneratePage";
 import { BankPage } from "@/pages/BankPage";
 import { ExamBuilderPage } from "@/pages/ExamBuilderPage";
-import { ReviewExportPage } from "@/pages/ReviewExportPage";
+import { ExamsPage } from "@/pages/ExamsPage";
+import { AuthPage } from "@/pages/AuthPage";
+import { AuthProvider, useAuth } from "@/lib/AuthContext";
 
 export type Page =
   | "overview"
   | "upload"
   | "analysis"
-  | "generate"
   | "bank"
   | "exam"
-  | "review";
+  | "exams";
 
-export default function App() {
+function AppShell() {
   const [page, setPage] = useState<Page>("overview");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [examSeedIds, setExamSeedIds] = useState<string[]>([]);
-  const [activeBlueprintId, setActiveBlueprintId] = useState<string | null>(null);
+  const [editExamId, setEditExamId] = useState<string | null>(null);
   const [bankSearch, setBankSearch] = useState<string | undefined>(undefined);
 
   const goToExamBuilder = (questionIds: string[]) => {
     setExamSeedIds(questionIds);
+    setEditExamId(null);
     setPage("exam");
   };
 
-  const goToReview = (blueprintId: string) => {
-    setActiveBlueprintId(blueprintId);
-    setPage("review");
+  const goToNewExam = () => {
+    setExamSeedIds([]);
+    setEditExamId(null);
+    setPage("exam");
+  };
+
+  const goToEditExam = (examId: string) => {
+    setExamSeedIds([]);
+    setEditExamId(examId);
+    setPage("exam");
+  };
+
+  const goToExams = () => {
+    setPage("exams");
   };
 
   const goToBankSearch = (query: string) => {
@@ -44,7 +56,7 @@ export default function App() {
     <div className="flex h-screen overflow-hidden bg-secondary/40">
       <Sidebar
         active={page}
-        onNavigate={setPage}
+        onNavigate={(p) => (p === "exam" ? goToNewExam() : setPage(p))}
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
       />
@@ -53,24 +65,42 @@ export default function App() {
         <Topbar
           page={page}
           onMenuClick={() => setSidebarOpen(true)}
-          onNavigate={setPage}
+          onNavigate={(p) => (p === "exam" ? goToNewExam() : setPage(p))}
           onSelectQuestion={goToBankSearch}
         />
 
         <main className="flex-1 overflow-y-auto scrollbar-thin">
           <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:py-8">
-            {page === "overview" && <OverviewPage onNavigate={setPage} />}
+            {page === "overview" && <OverviewPage onNavigate={(p) => (p === "exam" ? goToNewExam() : setPage(p))} />}
             {page === "upload" && <UploadPage />}
             {page === "analysis" && <AnalysisPage />}
-            {page === "generate" && <GeneratePage />}
             {page === "bank" && <BankPage onSendToExam={goToExamBuilder} initialSearch={bankSearch} />}
-            {page === "exam" && <ExamBuilderPage seedQuestionIds={examSeedIds} onSaved={goToReview} />}
-            {page === "review" && (
-              <ReviewExportPage blueprintId={activeBlueprintId} onNavigate={setPage} onSelectBlueprint={goToReview} />
+            {page === "exam" && (
+              <ExamBuilderPage seedQuestionIds={examSeedIds} editExamId={editExamId} onSaved={goToExams} />
             )}
+            {page === "exams" && <ExamsPage onEdit={goToEditExam} />}
           </div>
         </main>
       </div>
     </div>
+  );
+}
+
+function Gate() {
+  const { ready, teacher } = useAuth();
+  if (!ready) {
+    return <div className="flex min-h-screen items-center justify-center bg-secondary/40" />;
+  }
+  if (!teacher) {
+    return <AuthPage />;
+  }
+  return <AppShell />;
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <Gate />
+    </AuthProvider>
   );
 }

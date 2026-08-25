@@ -65,12 +65,13 @@ def merge_into_graph(
         if not node_id:
             continue
         if graph_store.graph.has_node(node_id):
+            _add_source(graph_store.graph.nodes[node_id], source_document)
             continue
         graph_store.add_topic(
             node_id,
             name=topic.name,
             description=topic.description,
-            source_document=source_document,
+            source_documents=[source_document],
         )
 
     for relation in result.relations:
@@ -79,10 +80,26 @@ def merge_into_graph(
         if not source_id or not target_id:
             continue
         if not graph_store.graph.has_node(source_id):
-            graph_store.add_topic(source_id, name=relation.source, source_document=source_document)
+            graph_store.add_topic(source_id, name=relation.source, source_documents=[source_document])
+        else:
+            _add_source(graph_store.graph.nodes[source_id], source_document)
         if not graph_store.graph.has_node(target_id):
-            graph_store.add_topic(target_id, name=relation.target, source_document=source_document)
-        graph_store.add_relation(source_id, target_id, relation.relation_type)
+            graph_store.add_topic(target_id, name=relation.target, source_documents=[source_document])
+        else:
+            _add_source(graph_store.graph.nodes[target_id], source_document)
+        graph_store.add_relation(source_id, target_id, relation.relation_type, source_document=source_document)
+
+
+def _add_source(node_data: dict, source_document: str) -> None:
+    """Record that `source_document` also supports an already-existing node,
+    so deleting one document never wipes out a topic another document still
+    supports. Handles nodes created before this field existed too."""
+    sources = list(node_data.get("source_documents") or [])
+    if not sources and node_data.get("source_document"):
+        sources = [node_data["source_document"]]
+    if source_document not in sources:
+        sources.append(source_document)
+    node_data["source_documents"] = sources
 
 
 def ingest_chunks(

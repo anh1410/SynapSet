@@ -17,11 +17,11 @@ import {
   fetchGraph,
   fetchDocuments,
   fetchQuestions,
-  listBlueprints,
+  listExams,
   timeAgo,
   type GraphNode,
   type UploadedDocument,
-  type PaperBlueprint,
+  type Exam,
 } from "@/lib/api";
 import type { Page } from "@/App";
 
@@ -29,7 +29,7 @@ type Activity = {
   id: string;
   label: string;
   time: string;
-  type: "generate" | "upload" | "export" | "create";
+  type: "upload" | "create";
   ts: number;
 };
 
@@ -37,7 +37,7 @@ export function OverviewPage({ onNavigate }: { onNavigate: (p: Page) => void }) 
   const [nodes, setNodes] = useState<GraphNode[]>([]);
   const [documents, setDocuments] = useState<UploadedDocument[]>([]);
   const [questionCount, setQuestionCount] = useState(0);
-  const [blueprints, setBlueprints] = useState<PaperBlueprint[]>([]);
+  const [exams, setExams] = useState<Exam[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -45,7 +45,7 @@ export function OverviewPage({ onNavigate }: { onNavigate: (p: Page) => void }) 
       fetchGraph().then((g) => setNodes(g.nodes)),
       fetchDocuments().then(setDocuments),
       fetchQuestions().then((qs) => setQuestionCount(qs.length)),
-      listBlueprints().then(setBlueprints),
+      listExams().then(setExams),
     ])
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -84,20 +84,20 @@ export function OverviewPage({ onNavigate }: { onNavigate: (p: Page) => void }) 
         ts: new Date(d.uploaded_at).getTime(),
       })
     ),
-    ...blueprints.slice(0, 5).map(
-      (b): Activity => ({
-        id: `bp-${b.id}`,
-        label: b.status === "exported" ? `Exported "${b.name}"` : `Created exam blueprint "${b.name}"`,
-        time: timeAgo(b.updated_at),
-        type: b.status === "exported" ? "export" : "create",
-        ts: new Date(b.updated_at).getTime(),
+    ...exams.slice(0, 5).map(
+      (e): Activity => ({
+        id: `exam-${e.id}`,
+        label: e.bucket === "closed" ? `Closed "${e.name}"` : `Created quiz "${e.name}"`,
+        time: timeAgo(e.updated_at),
+        type: "create",
+        ts: new Date(e.updated_at).getTime(),
       })
     ),
   ]
     .sort((a, b) => b.ts - a.ts)
     .slice(0, 5);
 
-  const activityIcon = { generate: Sparkles, upload: UploadCloud, export: FileText, create: FileText };
+  const activityIcon = { upload: UploadCloud, create: FileText };
 
   return (
     <div className="space-y-6">
@@ -177,7 +177,7 @@ export function OverviewPage({ onNavigate }: { onNavigate: (p: Page) => void }) 
                 </div>
               ))
             )}
-            <Button variant="secondary" size="sm" className="w-full" onClick={() => onNavigate("generate")}>
+            <Button variant="secondary" size="sm" className="w-full" onClick={() => onNavigate("exam")}>
               Generate questions <ArrowUpRight className="h-3.5 w-3.5" />
             </Button>
           </CardContent>
@@ -243,9 +243,9 @@ export function OverviewPage({ onNavigate }: { onNavigate: (p: Page) => void }) 
           <CardContent className="flex h-full flex-col justify-between p-6">
             <div>
               <Sparkles className="h-5 w-5 opacity-90" />
-              <p className="mt-3 text-sm font-semibold">Ready to build your next paper?</p>
+              <p className="mt-3 text-sm font-semibold">Ready to build your next quiz?</p>
               <p className="mt-1 text-xs text-primary-foreground/80">
-                Set your constraints and let the system assemble a balanced exam automatically.
+                Add questions, set a difficulty and Bloom's level for each, then schedule it to go live.
               </p>
             </div>
             <Button
@@ -254,7 +254,7 @@ export function OverviewPage({ onNavigate }: { onNavigate: (p: Page) => void }) 
               className="mt-4 w-fit bg-white text-primary hover:bg-white/90"
               onClick={() => onNavigate("exam")}
             >
-              Create exam paper <ArrowRight className="h-3.5 w-3.5" />
+              Build a quiz <ArrowRight className="h-3.5 w-3.5" />
             </Button>
           </CardContent>
         </Card>

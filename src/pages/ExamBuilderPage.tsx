@@ -1,389 +1,238 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   FileStack,
-  Wand2,
   Clock,
   Plus,
-  Minus,
   Trash2,
   AlertTriangle,
   Save,
   Sparkles,
   RefreshCw,
-  X,
-  ShieldAlert,
+  Lock,
+  CalendarClock,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   BLOOM_LEVELS,
   BLOOM_LABELS,
+  DIFFICULTY_LEVELS,
   QUESTION_TYPE_LABELS,
-  createBlueprint,
+  QUESTION_TYPE_ORDER,
+  createExam,
   difficultyBucket,
   fetchGraph,
   fetchQuestions,
   generateQuestions,
-  optimizePaper,
+  getExam,
+  updateExam,
   type BloomLevel,
-  type GeneratedQuestionResult,
+  type Difficulty,
   type GraphNode,
   type Question,
   type QuestionType,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-const bloomColors: Record<BloomLevel, string> = {
-  1: "bg-slate-400",
-  2: "bg-sky-400",
-  3: "bg-primary",
-  4: "bg-warning",
-  5: "bg-orange-400",
-  6: "bg-destructive",
-};
-
-const defaultBloomMix: Record<BloomLevel, number> = { 1: 10, 2: 25, 3: 30, 4: 20, 5: 10, 6: 5 };
-
-const questionTypes: QuestionType[] = ["short_answer", "long_answer", "mcq", "numerical"];
-
-interface TopicRow {
+interface BuilderRow {
   rowId: string;
+  status: "pending" | "generating" | "generated" | "error";
   topicId: string;
-  count: number;
   questionType: QuestionType;
   bloomLevel: BloomLevel;
   marks: number;
-}
-
-interface RowResult {
-  rowId: string;
-  results: GeneratedQuestionResult[];
-  error: string | null;
+  difficulty: Difficulty;
+  question?: Question;
+  error?: string;
 }
 
 let rowIdCounter = 0;
-const newRowId = () => `row-${++rowIdCounter}`;
+const newRowId = () => `row-${Date.now()}-${++rowIdCounter}`;
+
+function makeRow(topics: GraphNode[]): BuilderRow {
+  return {
+    rowId: newRowId(),
+    status: "pending",
+    topicId: topics[0]?.id ?? "",
+    questionType: "short_answer",
+    bloomLevel: 2,
+    marks: 5,
+    difficulty: "Medium",
+  };
+}
 
 export function ExamBuilderPage({
   seedQuestionIds,
+  editExamId,
   onSaved,
 }: {
   seedQuestionIds: string[];
-  onSaved: (blueprintId: string) => void;
+  editExamId: string | null;
+  onSaved: (examId: string) => void;
 }) {
   const [topics, setTopics] = useState<GraphNode[]>([]);
-  const [allQuestions, setAllQuestions] = useState<Question[]>([]);
-  const [paperName, setPaperName] = useState(`Exam Paper — ${new Date().toLocaleDateString()}`);
-  const [duration, setDuration] = useState(90);
-
-  const isSeeded = seedQuestionIds.length > 0;
+  const [examId, setExamId] = useState<string | null>(editExamId);
+  const [examName, setExamName] = useState(`Weekly Quiz — ${new Date().toLocaleDateString()}`);
+  const [duration, setDuration] = useState(30);
+  const [goLiveAt, setGoLiveAt] = useState("");
+  const [password, setPassword] = useState("");
+  const [rows, setRows] = useState<BuilderRow[]>([]);
+  const [generatingAll, setGeneratingAll] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     fetchGraph().then((g) => setTopics(g.nodes));
-    fetchQuestions().then(setAllQuestions);
   }, []);
 
-  // ---------- Seeded mode (from Bank selection): unchanged CP-SAT flow over a fixed pool ----------
-  const [seededBloomMix, setSeededBloomMix] = useState<Record<BloomLevel, number>>(defaultBloomMix);
-  const [seededTotalMarks, setSeededTotalMarks] = useState(50);
-  const [seededSelected, setSeededSelected] = useState<Question[] | null>(null);
-  const [seededStatus, setSeededStatus] = useState<string | null>(null);
-  const [seededRunning, setSeededRunning] = useState(false);
-  const [seededError, setSeededError] = useState<string | null>(null);
+  useEffect(() => {
+    if (loaded) return;
 
-  const candidatePool = useMemo(
-    () => allQuestions.filter((q) => seedQuestionIds.includes(q.id)),
-    [allQuestions, seedQuestionIds]
-  );
-  const seededBloomSum = BLOOM_LEVELS.reduce((s, b) => s + seededBloomMix[b], 0);
-  const adjustSeededBloom = (level: BloomLevel, delta: number) =>
-    setSeededBloomMix((m) => ({ ...m, [level]: Math.max(0, Math.min(100, m[level] + delta)) }));
-
-  const runSeededOptimize = async () => {
-    setSeededRunning(true);
-    setSeededStatus(null);
-    setSeededSelected(null);
-    setSeededError(null);
-    try {
-      const weights: Partial<Record<BloomLevel, number>> = {};
-      BLOOM_LEVELS.forEach((b) => {
-        if (seededBloomMix[b] > 0) weights[b] = seededBloomMix[b] / (seededBloomSum || 1);
+    if (editExamId) {
+      getExam(editExamId).then(({ exam, questions }) => {
+        setExamId(exam.id);
+        setExamName(exam.name);
+        setDuration(exam.duration_minutes ?? 30);
+        setGoLiveAt(exam.go_live_at ? exam.go_live_at.slice(0, 16) : "");
+        setPassword(exam.password ?? "");
+        setRows(
+          questions.map((q) => ({
+            rowId: q.id,
+            status: "generated" as const,
+            topicId: q.topic_ids[0] ?? "",
+            questionType: q.question_type,
+            bloomLevel: q.bloom_level,
+            marks: q.marks,
+            difficulty: difficultyBucket(q.difficulty_score),
+            question: q,
+          }))
+        );
+        setLoaded(true);
       });
-      const result = await optimizePaper(
-        { total_marks: seededTotalMarks, bloom_distribution: { weights } },
-        candidatePool.map((q) => q.id)
-      );
-      setSeededStatus(result.status);
-      if (result.status === "OPTIMAL" || result.status === "FEASIBLE") setSeededSelected(result.selected);
-    } catch (e) {
-      setSeededStatus("ERROR");
-      setSeededError(e instanceof Error ? e.message : "Unknown error");
-    } finally {
-      setSeededRunning(false);
+      return;
     }
-  };
 
-  const seededActualMarks = seededSelected?.reduce((s, q) => s + q.marks, 0) ?? 0;
+    if (seedQuestionIds.length > 0) {
+      fetchQuestions().then((all) => {
+        const byId = new Map(all.map((q) => [q.id, q]));
+        setRows(
+          seedQuestionIds
+            .map((id) => byId.get(id))
+            .filter((q): q is Question => Boolean(q))
+            .map((q) => ({
+              rowId: q.id,
+              status: "generated" as const,
+              topicId: q.topic_ids[0] ?? "",
+              questionType: q.question_type,
+              bloomLevel: q.bloom_level,
+              marks: q.marks,
+              difficulty: difficultyBucket(q.difficulty_score),
+              question: q,
+            }))
+        );
+        setLoaded(true);
+      });
+      return;
+    }
 
-  const handleSaveSeeded = async () => {
-    if (!seededSelected) return;
-    const blueprint = await createBlueprint({
-      name: paperName,
-      total_marks: seededTotalMarks,
-      duration_minutes: duration,
-      question_ids: seededSelected.map((q) => q.id),
-    });
-    onSaved(blueprint.id);
-  };
-
-  // ---------- Topic-spec mode: explicit per-topic count/type/bloom/marks, no solver needed ----------
-  const [rows, setRows] = useState<TopicRow[]>([]);
-  const [rowResults, setRowResults] = useState<RowResult[]>([]);
-  const [excludedIds, setExcludedIds] = useState<Set<string>>(new Set());
-  const [generating, setGenerating] = useState(false);
-  const [regeneratingRow, setRegeneratingRow] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [hasGenerated, setHasGenerated] = useState(false);
+    setLoaded(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editExamId, seedQuestionIds, loaded]);
 
   useEffect(() => {
-    if (!isSeeded && topics.length > 0 && rows.length === 0) {
-      setRows([
-        { rowId: newRowId(), topicId: topics[0].id, count: 3, questionType: "short_answer", bloomLevel: 2, marks: 5 },
-      ]);
+    if (loaded && !editExamId && seedQuestionIds.length === 0 && rows.length === 0 && topics.length > 0) {
+      setRows([makeRow(topics)]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [topics, isSeeded]);
-
-  const addRow = () =>
-    setRows((r) => [
-      ...r,
-      {
-        rowId: newRowId(),
-        topicId: topics[0]?.id ?? "",
-        count: 3,
-        questionType: "short_answer",
-        bloomLevel: 2,
-        marks: 5,
-      },
-    ]);
-
-  const removeRow = (rowId: string) => setRows((r) => r.filter((row) => row.rowId !== rowId));
-
-  const updateRow = <K extends keyof TopicRow>(rowId: string, key: K, value: TopicRow[K]) =>
-    setRows((r) => r.map((row) => (row.rowId === rowId ? { ...row, [key]: value } : row)));
+  }, [loaded, topics]);
 
   const topicName = (id: string) => topics.find((t) => t.id === id)?.name ?? id;
 
-  const plannedQuestions = rows.reduce((s, r) => s + r.count, 0);
-  const plannedMarks = rows.reduce((s, r) => s + r.count * r.marks, 0);
+  const addRow = () => setRows((r) => [...r, makeRow(topics)]);
+  const removeRow = (rowId: string) => setRows((r) => r.filter((row) => row.rowId !== rowId));
+  const updateRow = <K extends keyof BuilderRow>(rowId: string, key: K, value: BuilderRow[K]) =>
+    setRows((r) => r.map((row) => (row.rowId === rowId ? { ...row, [key]: value } : row)));
 
-  const runRow = async (row: TopicRow): Promise<RowResult> => {
+  const generateRow = async (rowId: string) => {
+    const row = rows.find((r) => r.rowId === rowId);
+    if (!row || !row.topicId) return;
+    updateRow(rowId, "status", "generating");
     try {
       const { results } = await generateQuestions({
         topic: topicName(row.topicId),
-        num_questions: row.count,
+        num_questions: 1,
         bloom_level: row.bloomLevel,
         marks: row.marks,
         question_type: row.questionType,
+        target_difficulty: row.difficulty,
         check_duplicates: true,
         save_to_bank: true,
       });
-      return { rowId: row.rowId, results, error: results.length === 0 ? "No questions returned" : null };
+      if (results.length === 0) {
+        setRows((r) => r.map((x) => (x.rowId === rowId ? { ...x, status: "error", error: "No question returned" } : x)));
+        return;
+      }
+      setRows((r) => r.map((x) => (x.rowId === rowId ? { ...x, status: "generated", question: results[0].question } : x)));
     } catch (e) {
-      return { rowId: row.rowId, results: [], error: e instanceof Error ? e.message : "Generation failed" };
+      setRows((r) =>
+        r.map((x) => (x.rowId === rowId ? { ...x, status: "error", error: e instanceof Error ? e.message : "Generation failed" } : x))
+      );
     }
   };
 
-  const generatePaper = async () => {
-    setGenerating(true);
-    setRowResults([]);
-    setExcludedIds(new Set());
-    const results: RowResult[] = [];
-    for (const row of rows) {
-      results.push(await runRow(row));
-      setRowResults([...results]);
+  const generateAll = async () => {
+    setGeneratingAll(true);
+    const pending = rows.filter((r) => r.status === "pending" || r.status === "error");
+    for (const row of pending) {
+      await generateRow(row.rowId);
     }
-    setHasGenerated(true);
-    setGenerating(false);
+    setGeneratingAll(false);
   };
 
-  const regenerateRow = async (rowId: string) => {
-    const row = rows.find((r) => r.rowId === rowId);
-    if (!row) return;
-    setRegeneratingRow(rowId);
-    const fresh = await runRow(row);
-    setRowResults((prev) => prev.map((r) => (r.rowId === rowId ? fresh : r)));
-    setRegeneratingRow(null);
-  };
+  const generatedRows = rows.filter((r) => r.status === "generated" && r.question);
+  const totalMarks = generatedRows.reduce((s, r) => s + (r.question?.marks ?? 0), 0);
+  const anyError = rows.some((r) => r.status === "error");
+  const anyPending = rows.some((r) => r.status === "pending");
 
-  const toggleExcluded = (questionId: string) =>
-    setExcludedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(questionId)) next.delete(questionId);
-      else next.add(questionId);
-      return next;
-    });
-
-  const finalQuestions = rowResults.flatMap((r) => r.results.map((res) => res.question)).filter((q) => !excludedIds.has(q.id));
-  const finalMarks = finalQuestions.reduce((s, q) => s + q.marks, 0);
-  const anyRowError = rowResults.some((r) => r.error);
-
-  const handleSaveTopicPlan = async () => {
-    if (finalQuestions.length === 0) return;
+  const handleSave = async () => {
+    if (generatedRows.length === 0) return;
     setSaving(true);
     try {
-      const blueprint = await createBlueprint({
-        name: paperName,
-        total_marks: finalMarks,
-        duration_minutes: duration,
-        question_ids: finalQuestions.map((q) => q.id),
-      });
-      onSaved(blueprint.id);
+      const question_ids = generatedRows.map((r) => r.question!.id);
+      const scheduleUpdate = {
+        go_live_at: goLiveAt ? new Date(goLiveAt).toISOString() : null,
+        password: password.trim() || null,
+      };
+
+      let savedId = examId;
+      if (savedId) {
+        await updateExam(savedId, {
+          name: examName,
+          question_ids,
+          total_marks: totalMarks,
+          duration_minutes: duration,
+          ...scheduleUpdate,
+        });
+      } else {
+        const exam = await createExam({
+          name: examName,
+          question_ids,
+          total_marks: totalMarks,
+          duration_minutes: duration,
+        });
+        savedId = exam.id;
+        if (scheduleUpdate.go_live_at || scheduleUpdate.password) {
+          await updateExam(savedId, scheduleUpdate);
+        }
+      }
+      onSaved(savedId);
     } finally {
       setSaving(false);
     }
   };
-
-  // ============================== RENDER ==============================
-
-  if (isSeeded) {
-    return (
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-1 h-fit lg:sticky lg:top-20">
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <FileStack className="h-4 w-4 text-primary" />
-              <CardTitle>Paper Requirements</CardTitle>
-            </div>
-            <CardDescription>Select the best combination from your chosen questions</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-5">
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-foreground">Paper Name</label>
-              <Input value={paperName} onChange={(e) => setPaperName(e.target.value)} />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-foreground"># Total Marks</label>
-                <Input value={seededTotalMarks} onChange={(e) => setSeededTotalMarks(Number(e.target.value))} type="number" />
-              </div>
-              <div className="space-y-1.5">
-                <label className="flex items-center gap-1.5 text-xs font-medium text-foreground">
-                  <Clock className="h-3.5 w-3.5" /> Duration (min)
-                </label>
-                <Input value={duration} onChange={(e) => setDuration(Number(e.target.value))} type="number" />
-              </div>
-            </div>
-            <div className="space-y-2.5">
-              <label className="text-xs font-medium text-foreground">Bloom's Level Mix</label>
-              {BLOOM_LEVELS.map((b) => (
-                <div key={b} className="flex items-center gap-3">
-                  <span className="w-20 shrink-0 text-xs text-muted-foreground">{BLOOM_LABELS[b]}</span>
-                  <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-secondary">
-                    <div
-                      className={`h-full rounded-full ${bloomColors[b]}`}
-                      style={{ width: `${seededBloomSum ? (seededBloomMix[b] / seededBloomSum) * 100 : 0}%` }}
-                    />
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <button className="rounded p-0.5 text-muted-foreground hover:bg-secondary" onClick={() => adjustSeededBloom(b, -5)}>
-                      <Minus className="h-3 w-3" />
-                    </button>
-                    <span className="w-9 text-right text-xs font-medium text-foreground">
-                      {seededBloomSum ? Math.round((seededBloomMix[b] / seededBloomSum) * 100) : 0}%
-                    </span>
-                    <button className="rounded p-0.5 text-muted-foreground hover:bg-secondary" onClick={() => adjustSeededBloom(b, 5)}>
-                      <Plus className="h-3 w-3" />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div className="rounded-lg border border-primary/20 bg-accent p-3 text-xs text-accent-foreground">
-              Optimizing over {seedQuestionIds.length} question{seedQuestionIds.length !== 1 && "s"} selected from the
-              Question Bank.
-            </div>
-            <Button className="w-full" onClick={runSeededOptimize} disabled={seededRunning || candidatePool.length === 0}>
-              <Wand2 className="h-4 w-4" /> {seededRunning ? "Optimizing..." : "Auto-generate Paper"}
-            </Button>
-          </CardContent>
-        </Card>
-
-        <div className="space-y-4 lg:col-span-2">
-          {seededStatus === null ? (
-            <Card>
-              <CardContent className="flex flex-col items-center justify-center py-16 text-center">
-                <FileStack className="h-8 w-8 text-muted-foreground" />
-                <p className="mt-3 text-sm font-medium text-foreground">No paper generated yet</p>
-                <p className="mt-1 text-xs text-muted-foreground">Set your requirements and click "Auto-generate Paper"</p>
-              </CardContent>
-            </Card>
-          ) : seededStatus === "INFEASIBLE" || seededStatus === "ERROR" || !seededSelected ? (
-            <Card className="border-destructive/30 bg-destructive/[0.03]">
-              <CardContent className="flex flex-col items-center justify-center gap-2 py-16 text-center">
-                <AlertTriangle className="h-8 w-8 text-destructive" />
-                <p className="text-sm font-medium text-foreground">
-                  {seededStatus === "INFEASIBLE" ? "No paper satisfies these constraints" : "Something went wrong"}
-                </p>
-                <p className="max-w-sm text-xs text-muted-foreground">
-                  {seededStatus === "INFEASIBLE"
-                    ? "Try lowering total marks or widening the Bloom mix — the selected questions can't satisfy this exactly."
-                    : seededError ?? "The request failed. Try again."}
-                </p>
-              </CardContent>
-            </Card>
-          ) : (
-            <>
-              <Card className="border-success/30 bg-success/[0.03]">
-                <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
-                  <div>
-                    <p className="text-sm font-medium text-foreground">Constraints satisfied ({seededStatus})</p>
-                    <p className="text-xs text-muted-foreground">
-                      {seededActualMarks} marks · {duration} min · {seededSelected.length} questions
-                    </p>
-                  </div>
-                  <Button size="sm" onClick={handleSaveSeeded}>
-                    <Save className="h-3.5 w-3.5" /> Save Paper
-                  </Button>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader>
-                  <CardTitle>Selected Questions</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {seededSelected.map((q, i) => {
-                    const bucket = difficultyBucket(q.difficulty_score);
-                    return (
-                      <div key={q.id} className="flex items-start gap-3 rounded-lg border border-border bg-white p-3.5">
-                        <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-secondary text-[11px] font-semibold text-muted-foreground">
-                          {i + 1}
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm text-foreground">{q.text}</p>
-                          <div className="mt-2 flex flex-wrap gap-1.5">
-                            <Badge variant="accent">{BLOOM_LABELS[q.bloom_level]}</Badge>
-                            <Badge variant={bucket === "Hard" ? "destructive" : bucket === "Medium" ? "warning" : "success"}>
-                              {bucket}
-                            </Badge>
-                            <Badge variant="outline">{q.marks} marks</Badge>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </CardContent>
-              </Card>
-            </>
-          )}
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -391,14 +240,14 @@ export function ExamBuilderPage({
         <CardHeader>
           <div className="flex items-center gap-2">
             <FileStack className="h-4 w-4 text-primary" />
-            <CardTitle>Question Plan</CardTitle>
+            <CardTitle>Exam Builder</CardTitle>
           </div>
-          <CardDescription>Choose exactly how many questions of each type/level to pull from each topic</CardDescription>
+          <CardDescription>Add questions one at a time — pick topic, type, Bloom's level, marks, and difficulty for each</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-foreground">Paper Name</label>
-            <Input value={paperName} onChange={(e) => setPaperName(e.target.value)} />
+            <label className="text-xs font-medium text-foreground">Quiz Name</label>
+            <Input value={examName} onChange={(e) => setExamName(e.target.value)} />
           </div>
           <div className="space-y-1.5">
             <label className="flex items-center gap-1.5 text-xs font-medium text-foreground">
@@ -407,184 +256,208 @@ export function ExamBuilderPage({
             <Input value={duration} onChange={(e) => setDuration(Number(e.target.value))} type="number" />
           </div>
 
+          <div className="space-y-3 rounded-lg border border-border p-3">
+            <p className="flex items-center gap-1.5 text-[11px] font-semibold text-foreground">
+              <CalendarClock className="h-3.5 w-3.5" /> Schedule (optional now)
+            </p>
+            <div className="space-y-1">
+              <label className="text-[11px] font-medium text-muted-foreground">Go live at</label>
+              <Input type="datetime-local" value={goLiveAt} onChange={(e) => setGoLiveAt(e.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <label className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+                <Lock className="h-3 w-3" /> Access password
+              </label>
+              <Input
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Students enter this to start the quiz"
+              />
+            </div>
+          </div>
+
           <div className="space-y-3">
-            {rows.map((row) => (
+            {rows.map((row, idx) => (
               <div key={row.rowId} className="space-y-2 rounded-lg border border-border p-3">
                 <div className="flex items-center justify-between">
-                  <label className="text-[11px] font-medium text-muted-foreground">Topic</label>
+                  <label className="text-[11px] font-semibold text-foreground">Question {idx + 1}</label>
                   <button className="text-muted-foreground hover:text-destructive" onClick={() => removeRow(row.rowId)}>
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 </div>
-                <Select value={row.topicId} onChange={(e) => updateRow(row.rowId, "topicId", e.target.value)}>
-                  {topics.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.name}
-                    </option>
-                  ))}
-                </Select>
 
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-medium text-muted-foreground">Questions</label>
-                    <Input
-                      type="number"
-                      min={1}
-                      value={row.count}
-                      onChange={(e) => updateRow(row.rowId, "count", Math.max(1, Number(e.target.value)))}
-                    />
+                {row.status === "generated" && row.question ? (
+                  <div className="space-y-1.5">
+                    <p className="line-clamp-2 text-xs text-foreground">{row.question.text}</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      <Badge variant="outline">{QUESTION_TYPE_LABELS[row.question.question_type]}</Badge>
+                      <Badge variant="outline">{row.question.marks} marks</Badge>
+                      <Badge variant="accent">{BLOOM_LABELS[row.question.bloom_level]}</Badge>
+                    </div>
+                    <Button variant="ghost" size="sm" onClick={() => generateRow(row.rowId)}>
+                      <RefreshCw className="h-3.5 w-3.5" /> Regenerate
+                    </Button>
                   </div>
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-medium text-muted-foreground">Marks each</label>
-                    <Input
-                      type="number"
-                      min={1}
-                      value={row.marks}
-                      onChange={(e) => updateRow(row.rowId, "marks", Math.max(1, Number(e.target.value)))}
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-medium text-muted-foreground">Type</label>
-                    <Select value={row.questionType} onChange={(e) => updateRow(row.rowId, "questionType", e.target.value as QuestionType)}>
-                      {questionTypes.map((qt) => (
-                        <option key={qt} value={qt}>
-                          {QUESTION_TYPE_LABELS[qt]}
-                        </option>
-                      ))}
-                    </Select>
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-medium text-muted-foreground">Bloom Level</label>
+                ) : (
+                  <>
                     <Select
-                      value={row.bloomLevel}
-                      onChange={(e) => updateRow(row.rowId, "bloomLevel", Number(e.target.value) as BloomLevel)}
+                      value={row.topicId}
+                      onChange={(e) => updateRow(row.rowId, "topicId", e.target.value)}
+                      disabled={topics.length === 0}
                     >
-                      {BLOOM_LEVELS.map((b) => (
-                        <option key={b} value={b}>
-                          {BLOOM_LABELS[b]}
+                      {topics.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name}
                         </option>
                       ))}
                     </Select>
-                  </div>
-                </div>
-
-                <p className="text-[11px] text-muted-foreground">
-                  = {row.count} question{row.count !== 1 && "s"} · {row.count * row.marks} marks
-                </p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Select
+                        value={row.questionType}
+                        onChange={(e) => updateRow(row.rowId, "questionType", e.target.value as QuestionType)}
+                      >
+                        {QUESTION_TYPE_ORDER.map((qt) => (
+                          <option key={qt} value={qt}>
+                            {QUESTION_TYPE_LABELS[qt]}
+                          </option>
+                        ))}
+                      </Select>
+                      <Select
+                        value={row.bloomLevel}
+                        onChange={(e) => updateRow(row.rowId, "bloomLevel", Number(e.target.value) as BloomLevel)}
+                      >
+                        {BLOOM_LEVELS.map((b) => (
+                          <option key={b} value={b}>
+                            {BLOOM_LABELS[b]}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Select
+                        value={row.difficulty}
+                        onChange={(e) => updateRow(row.rowId, "difficulty", e.target.value as Difficulty)}
+                      >
+                        {DIFFICULTY_LEVELS.map((d) => (
+                          <option key={d} value={d}>
+                            {d}
+                          </option>
+                        ))}
+                      </Select>
+                      <Input
+                        type="number"
+                        min={1}
+                        value={row.marks}
+                        onChange={(e) => updateRow(row.rowId, "marks", Math.max(1, Number(e.target.value)))}
+                        placeholder="Marks"
+                      />
+                    </div>
+                    {row.status === "error" && (
+                      <p className="flex items-center gap-1.5 text-[11px] text-destructive">
+                        <AlertTriangle className="h-3 w-3" /> {row.error}
+                      </p>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="w-full"
+                      onClick={() => generateRow(row.rowId)}
+                      disabled={row.status === "generating" || !row.topicId}
+                    >
+                      <Sparkles className="h-3.5 w-3.5" /> {row.status === "generating" ? "Generating..." : "Generate"}
+                    </Button>
+                  </>
+                )}
               </div>
             ))}
           </div>
 
           <Button variant="outline" size="sm" className="w-full" onClick={addRow} disabled={topics.length === 0}>
-            <Plus className="h-3.5 w-3.5" /> Add Topic
+            <Plus className="h-3.5 w-3.5" /> Add Question
           </Button>
 
           {topics.length === 0 && <p className="text-xs text-muted-foreground">Upload material first to see topics here.</p>}
 
           <div className="rounded-lg border border-border bg-secondary/40 p-3 text-xs">
             <div className="flex justify-between">
-              <span className="text-muted-foreground">Planned</span>
+              <span className="text-muted-foreground">Ready</span>
               <span className="font-medium text-foreground">
-                {plannedQuestions} question{plannedQuestions !== 1 && "s"} · {plannedMarks} marks
+                {generatedRows.length} of {rows.length} question{rows.length !== 1 && "s"} · {totalMarks} marks
               </span>
             </div>
           </div>
 
-          <Button className="w-full" onClick={generatePaper} disabled={generating || rows.length === 0}>
-            <Sparkles className="h-4 w-4" /> {generating ? "Generating..." : "Generate Paper"}
+          {anyPending && (
+            <Button variant="secondary" className="w-full" onClick={generateAll} disabled={generatingAll}>
+              <Sparkles className="h-4 w-4" /> {generatingAll ? "Generating..." : "Generate All Pending"}
+            </Button>
+          )}
+
+          <Button className="w-full" onClick={handleSave} disabled={saving || generatedRows.length === 0}>
+            <Save className="h-4 w-4" /> {saving ? "Saving..." : examId ? "Save Changes" : "Save Quiz"}
           </Button>
         </CardContent>
       </Card>
 
       <div className="space-y-4 lg:col-span-2">
-        {!hasGenerated ? (
+        {generatedRows.length === 0 ? (
           <Card>
             <CardContent className="flex flex-col items-center justify-center py-16 text-center">
               <FileStack className="h-8 w-8 text-muted-foreground" />
-              <p className="mt-3 text-sm font-medium text-foreground">No paper generated yet</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Add topics to your plan and click "Generate Paper" to preview
-              </p>
+              <p className="mt-3 text-sm font-medium text-foreground">No questions yet</p>
+              <p className="mt-1 text-xs text-muted-foreground">Add a question, configure it, and click "Generate"</p>
             </CardContent>
           </Card>
         ) : (
           <>
-            <Card className={cn(anyRowError ? "border-warning/30 bg-warning/[0.03]" : "border-success/30 bg-success/[0.03]")}>
-              <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
-                <div>
-                  <p className="text-sm font-medium text-foreground">
-                    {anyRowError ? "Generated with some issues" : "Paper generated"}
+            <Card className={cn(anyError ? "border-warning/30 bg-warning/[0.03]" : "border-success/30 bg-success/[0.03]")}>
+              <CardContent className="p-4">
+                <p className="text-sm font-medium text-foreground">
+                  {generatedRows.length} question{generatedRows.length !== 1 && "s"} ready · {totalMarks} marks · {duration} min
+                </p>
+                {goLiveAt && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Scheduled to go live {new Date(goLiveAt).toLocaleString()}
+                    {password && " · password protected"}
                   </p>
-                  <p className="text-xs text-muted-foreground">
-                    {finalMarks} marks · {duration} min · {finalQuestions.length} question{finalQuestions.length !== 1 && "s"}
-                    {excludedIds.size > 0 && ` · ${excludedIds.size} excluded`}
-                  </p>
-                </div>
-                <Button size="sm" onClick={handleSaveTopicPlan} disabled={saving || finalQuestions.length === 0}>
-                  <Save className="h-3.5 w-3.5" /> {saving ? "Saving..." : "Save Paper"}
-                </Button>
+                )}
               </CardContent>
             </Card>
 
-            {rowResults.map((rr) => {
-              const row = rows.find((r) => r.rowId === rr.rowId);
-              if (!row) return null;
+            {generatedRows.map((row, idx) => {
+              const q = row.question!;
+              const bucket = difficultyBucket(q.difficulty_score);
               return (
-                <Card key={rr.rowId}>
-                  <CardHeader className="flex-row items-center justify-between space-y-0">
-                    <div>
-                      <CardTitle>{topicName(row.topicId)}</CardTitle>
-                      <CardDescription>
-                        {BLOOM_LABELS[row.bloomLevel]} · {QUESTION_TYPE_LABELS[row.questionType]} · {row.marks} marks each
-                      </CardDescription>
-                    </div>
-                    <Button variant="ghost" size="sm" onClick={() => regenerateRow(rr.rowId)} disabled={regeneratingRow === rr.rowId}>
-                      <RefreshCw className={cn("h-3.5 w-3.5", regeneratingRow === rr.rowId && "animate-spin")} /> Regenerate
-                    </Button>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    {rr.error && (
-                      <p className="flex items-center gap-1.5 text-xs text-destructive">
-                        <AlertTriangle className="h-3.5 w-3.5" /> {rr.error}
+                <Card key={row.rowId}>
+                  <CardContent className="space-y-2 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <p className="text-sm text-foreground">
+                        {idx + 1}. {q.text}
                       </p>
+                    </div>
+                    {q.question_type === "code_fix" && q.starter_code && (
+                      <pre className="overflow-x-auto rounded-md bg-slate-900 p-3 text-xs text-slate-100">
+                        <code>{q.starter_code}</code>
+                      </pre>
                     )}
-                    {rr.results.map((res) => {
-                      const excluded = excludedIds.has(res.question.id);
-                      const bestMatch = res.duplicate_matches[0];
-                      const isDuplicate = Boolean(bestMatch?.is_duplicate);
-                      return (
-                        <div
-                          key={res.question.id}
-                          className={cn(
-                            "flex items-start gap-3 rounded-lg border p-3.5",
-                            excluded ? "border-border bg-secondary/30 opacity-50" : isDuplicate ? "border-warning/40 bg-warning/[0.03]" : "border-border bg-white"
-                          )}
-                        >
-                          <Checkbox checked={!excluded} onCheckedChange={() => toggleExcluded(res.question.id)} />
-                          <div className="min-w-0 flex-1">
-                            <p className="text-sm text-foreground">{res.question.text}</p>
-                            <div className="mt-2 flex flex-wrap gap-1.5">
-                              <Badge variant="outline">{res.question.marks} marks</Badge>
-                              {isDuplicate && (
-                                <Badge variant="warning">
-                                  <ShieldAlert className="h-3 w-3" /> {Math.round(bestMatch.final_score * 100)}% similar to existing
-                                </Badge>
-                              )}
-                            </div>
-                          </div>
-                          <button
-                            className="text-muted-foreground hover:text-destructive"
-                            onClick={() => toggleExcluded(res.question.id)}
-                            title={excluded ? "Include" : "Exclude"}
-                          >
-                            <X className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                      );
-                    })}
+                    {(q.question_type === "mcq" || q.question_type === "fill_in_blank") && q.options && (
+                      <ul className="space-y-0.5 text-xs text-muted-foreground">
+                        {q.options.map((opt, oi) => (
+                          <li key={oi} className={cn(opt === q.correct_answer && "font-medium text-success")}>
+                            {String.fromCharCode(97 + oi)}) {opt}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    <div className="flex flex-wrap gap-1.5">
+                      <Badge variant="outline">{QUESTION_TYPE_LABELS[q.question_type]}</Badge>
+                      <Badge variant="outline">{topicName(row.topicId)}</Badge>
+                      <Badge variant="outline">{q.marks} marks</Badge>
+                      <Badge variant="accent">{BLOOM_LABELS[q.bloom_level]}</Badge>
+                      <Badge variant={bucket === "Hard" ? "destructive" : bucket === "Medium" ? "warning" : "success"}>
+                        {bucket}
+                      </Badge>
+                    </div>
                   </CardContent>
                 </Card>
               );

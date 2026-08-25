@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import graph, paper, questions
+from app.api import auth, exams, graph, questions
 from app.core.config import get_settings
 
 settings = get_settings()
@@ -15,9 +15,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth.router)
 app.include_router(graph.router)
 app.include_router(questions.router)
-app.include_router(paper.router)
+app.include_router(exams.router)
 
 
 @app.get("/health")

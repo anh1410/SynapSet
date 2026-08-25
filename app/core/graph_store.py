@@ -38,8 +38,12 @@ class KnowledgeGraphStore:
     def add_topic(self, topic_id: str, **attrs) -> None:
         self.graph.add_node(topic_id, **attrs)
 
-    def add_relation(self, source_id: str, target_id: str, relation_type: str) -> None:
-        self.graph.add_edge(source_id, target_id, relation_type=relation_type)
+    def add_relation(self, source_id: str, target_id: str, relation_type: str, source_document: str | None = None) -> None:
+        existing = self.graph.get_edge_data(source_id, target_id) or {}
+        sources = list(existing.get("source_documents", []))
+        if source_document and source_document not in sources:
+            sources.append(source_document)
+        self.graph.add_edge(source_id, target_id, relation_type=relation_type, source_documents=sources)
 
     def compute_pagerank(self) -> dict[str, float]:
         return nx.pagerank(self.graph) if self.graph.number_of_nodes() else {}

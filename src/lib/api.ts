@@ -1,4 +1,8 @@
+import { clearSession, getToken, type TeacherPublic } from "@/lib/session";
+
 const BASE = "/api/v1";
+
+export class AuthError extends Error {}
 
 // ---------- Shared enums ----------
 
@@ -15,16 +19,35 @@ export const BLOOM_LABELS: Record<BloomLevel, string> = {
   6: "Create",
 };
 
-export type QuestionType = "mcq" | "short_answer" | "long_answer" | "numerical";
+export type QuestionType = "mcq" | "short_answer" | "long_answer" | "numerical" | "fill_in_blank" | "code_fix";
 
 export const QUESTION_TYPE_LABELS: Record<QuestionType, string> = {
   mcq: "Multiple Choice",
   short_answer: "Short Answer",
   long_answer: "Long Answer",
   numerical: "Numerical",
+  fill_in_blank: "Fill in the Blank (Options)",
+  code_fix: "Coding (Fix the Code)",
 };
 
+export const QUESTION_TYPE_ORDER: QuestionType[] = [
+  "mcq",
+  "fill_in_blank",
+  "short_answer",
+  "long_answer",
+  "numerical",
+  "code_fix",
+];
+
+export type Difficulty = "Easy" | "Medium" | "Hard";
+export const DIFFICULTY_LEVELS: Difficulty[] = ["Easy", "Medium", "Hard"];
+
 // ---------- Core resources ----------
+
+export interface CodeTestCase {
+  input: string;
+  expected_output: string;
+}
 
 export interface Question {
   id: string;
@@ -37,6 +60,9 @@ export interface Question {
   unit: number | null;
   options: string[] | null;
   correct_answer: string | null;
+  code_language: string | null;
+  starter_code: string | null;
+  test_cases: CodeTestCase[] | null;
   difficulty_score: number | null;
   embedding_id: string | null;
   is_duplicate_of: string | null;
@@ -102,42 +128,50 @@ export interface UploadedDocument {
   uploaded_at: string;
 }
 
-export type BlueprintStatus = "draft" | "exported";
+// ---------- Exams (weekly quizzes) ----------
 
-export interface PaperBlueprint {
+export type ExamStatus = "draft" | "scheduled" | "closed";
+export type ExamBucket = "draft" | "upcoming" | "live" | "closed";
+
+export interface Exam {
   id: string;
+  teacher_id: string;
   name: string;
+  question_ids: string[];
   total_marks: number;
   duration_minutes: number | null;
-  question_ids: string[];
-  status: BlueprintStatus;
+  go_live_at: string | null;
+  password: string | null;
+  status: ExamStatus;
+  bucket: ExamBucket;
   created_at: string;
   updated_at: string;
 }
 
-export interface BloomDistribution {
-  weights: Partial<Record<BloomLevel, number>>;
-}
-
-export interface PaperConstraints {
-  total_marks: number;
-  bloom_distribution: BloomDistribution;
-  co_coverage?: Record<string, number>;
-  unit_marks?: Record<string, number>;
-  num_questions?: number | null;
-  allowed_question_types?: QuestionType[] | null;
-}
-
 // ---------- fetch helpers ----------
 
-class ApiError extends Error {}
+export class ApiError extends Error {}
+
+function authHeaders(): Record<string, string> {
+  const token = getToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const isFormData = options.body instanceof FormData;
   const res = await fetch(`${BASE}${path}`, {
     ...options,
-    headers: isFormData ? options.headers : { "Content-Type": "application/json", ...options.headers },
+    headers: {
+      ...(isFormData ? {} : { "Content-Type": "application/json" }),
+      ...authHeaders(),
+      ...options.headers,
+    },
   });
+  if (res.status === 401) {
+    clearSession();
+    window.dispatchEvent(new Event("synapset:session-expired"));
+    throw new AuthError("Session expired, please log in again");
+  }
   if (!res.ok) {
     const text = await res.text();
     let message = text;
@@ -153,23 +187,23 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
   return res.json() as Promise<T>;
 }
 
-async function downloadFromResponse(res: Response, fallbackName: string) {
-  if (!res.ok) {
-    const text = await res.text();
-    throw new ApiError(text || `${res.status} ${res.statusText}`);
-  }
-  const blob = await res.blob();
-  const disposition = res.headers.get("content-disposition");
-  const match = disposition?.match(/filename="?([^"]+)"?/);
-  const filename = match?.[1] ?? fallbackName;
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
+// ---------- Auth ----------
+
+export interface AuthResponse {
+  access_token: string;
+  teacher: TeacherPublic;
+}
+
+export function signup(email: string, password: string, name: string) {
+  return apiFetch<AuthResponse>("/auth/signup", { method: "POST", body: JSON.stringify({ email, password, name }) });
+}
+
+export function login(email: string, password: string) {
+  return apiFetch<AuthResponse>("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
+}
+
+export function me() {
+  return apiFetch<TeacherPublic>("/auth/me");
 }
 
 // ---------- Graph & documents ----------
@@ -220,6 +254,7 @@ export interface GenerateQuestionsParams {
   bloom_level: BloomLevel;
   marks: number;
   question_type: QuestionType;
+  target_difficulty?: Difficulty;
   check_duplicates?: boolean;
   save_to_bank?: boolean;
 }
@@ -250,66 +285,42 @@ export function checkDuplicates(question: Question, threshold = 0.75) {
   });
 }
 
-// ---------- Paper: optimize & export ----------
+// ---------- Exams ----------
 
-export function optimizePaper(constraints: PaperConstraints, questionIds?: string[]) {
-  return apiFetch<{ status: string; selected: Question[] }>("/paper/optimize", {
-    method: "POST",
-    body: JSON.stringify({ constraints, question_ids: questionIds }),
-  });
+export function createExam(data: { name: string; question_ids?: string[]; total_marks?: number; duration_minutes?: number | null }) {
+  return apiFetch<Exam>("/exams", { method: "POST", body: JSON.stringify(data) });
 }
 
-export async function exportPaperAdhoc(title: string, questions: Question[], format: "pdf" | "docx") {
-  const res = await fetch(`${BASE}/paper/export`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ title, questions, format }),
-  });
-  await downloadFromResponse(res, `${title}.${format}`);
+export function listExams() {
+  return apiFetch<Exam[]>("/exams");
 }
 
-export function createBlueprint(data: {
-  name: string;
-  total_marks: number;
-  duration_minutes?: number;
-  question_ids: string[];
-}) {
-  return apiFetch<PaperBlueprint>("/paper/blueprints", { method: "POST", body: JSON.stringify(data) });
+export function getExam(id: string) {
+  return apiFetch<{ exam: Exam; questions: Question[] }>(`/exams/${id}`);
 }
 
-export function listBlueprints() {
-  return apiFetch<PaperBlueprint[]>("/paper/blueprints");
-}
-
-export function getBlueprint(id: string) {
-  return apiFetch<{ blueprint: PaperBlueprint; questions: Question[] }>(`/paper/blueprints/${id}`);
-}
-
-export function updateBlueprint(
+export function updateExam(
   id: string,
   data: Partial<{
     name: string;
-    total_marks: number;
-    duration_minutes: number;
     question_ids: string[];
-    status: BlueprintStatus;
+    total_marks: number;
+    duration_minutes: number | null;
+    go_live_at: string | null;
+    password: string | null;
+    status: ExamStatus;
   }>
 ) {
-  return apiFetch<PaperBlueprint>(`/paper/blueprints/${id}`, { method: "PATCH", body: JSON.stringify(data) });
+  return apiFetch<Exam>(`/exams/${id}`, { method: "PATCH", body: JSON.stringify(data) });
 }
 
-export function deleteBlueprint(id: string) {
-  return apiFetch<{ deleted: string }>(`/paper/blueprints/${id}`, { method: "DELETE" });
-}
-
-export async function exportBlueprint(id: string, name: string, format: "pdf" | "docx") {
-  const res = await fetch(`${BASE}/paper/blueprints/${id}/export?format=${format}`);
-  await downloadFromResponse(res, `${name}.${format}`);
+export function deleteExam(id: string) {
+  return apiFetch<{ deleted: string }>(`/exams/${id}`, { method: "DELETE" });
 }
 
 // ---------- Display helpers ----------
 
-export type DifficultyBucket = "Easy" | "Medium" | "Hard";
+export type DifficultyBucket = Difficulty;
 
 export function difficultyBucket(score: number | null | undefined): DifficultyBucket {
   if (score == null) return "Medium";
@@ -342,5 +353,3 @@ export function timeAgo(iso: string): string {
   if (days < 7) return `${days} days ago`;
   return new Date(iso).toLocaleDateString();
 }
-
-export { ApiError };

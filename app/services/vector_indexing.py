@@ -23,6 +23,12 @@ def index_chunks(chunks: list[TextChunk]) -> None:
     collection.upsert(ids=ids, embeddings=embeddings, documents=documents, metadatas=metadatas)
 
 
+def delete_document_chunks(filename: str) -> None:
+    """Remove every retrieval chunk indexed from a document, so deleting it
+    also stops it from showing up as grounding context for future generation."""
+    get_collection().delete(where={"source_document": filename})
+
+
 def query_similar_chunks(query: str, n_results: int = 5) -> list[dict]:
     """Return the top-n chunks (text + metadata + distance) most similar to the query."""
     collection = get_collection()

@@ -2,11 +2,9 @@ import {
   LayoutGrid,
   UploadCloud,
   Network,
-  Sparkles,
   Library,
   FileStack,
-  FileCheck2,
-  Settings,
+  ClipboardList,
   X,
   GraduationCap,
 } from "lucide-react";
@@ -17,10 +15,9 @@ const nav: { id: Page; label: string; icon: typeof LayoutGrid }[] = [
   { id: "overview", label: "Overview", icon: LayoutGrid },
   { id: "upload", label: "Upload Materials", icon: UploadCloud },
   { id: "analysis", label: "Topic Analysis", icon: Network },
-  { id: "generate", label: "Generate Questions", icon: Sparkles },
   { id: "bank", label: "Question Bank", icon: Library },
   { id: "exam", label: "Exam Builder", icon: FileStack },
-  { id: "review", label: "Review & Export", icon: FileCheck2 },
+  { id: "exams", label: "Exams", icon: ClipboardList },
 ];
 
 export function Sidebar({
@@ -53,7 +50,7 @@ export function Sidebar({
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
               <GraduationCap className="h-4.5 w-4.5" />
             </div>
-            <span className="text-sm font-semibold tracking-tight text-foreground">QuestionForge</span>
+            <span className="text-sm font-semibold tracking-tight text-foreground">SynapSet</span>
           </div>
           <button
             onClick={onClose}
@@ -90,13 +87,6 @@ export function Sidebar({
             );
           })}
         </nav>
-
-        <div className="border-t border-border p-3">
-          <button className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition-all duration-200 hover:bg-secondary hover:text-foreground">
-            <Settings className="h-4 w-4 text-slate-400" />
-            Settings
-          </button>
-        </div>
       </aside>
     </>
   );

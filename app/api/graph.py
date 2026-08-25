@@ -2,20 +2,22 @@ import shutil
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
+from app.api.deps import get_current_teacher
 from app.core.config import get_settings
 from app.core.document_store import get_document_store
 from app.core.graph_store import get_graph_store
 from app.core.question_bank import get_question_bank
 from app.schemas.document import DocumentCategory, UploadedDocument
+from app.services.document_cleanup import remove_document_from_graph
 from app.services.document_extraction import extract_and_chunk, extract_and_chunk_for_extraction
 from app.services.entity_extraction import extract_from_chunk, merge_into_graph
 from app.services.topic_dedup import merge_duplicate_topics
-from app.services.vector_indexing import index_chunks
+from app.services.vector_indexing import delete_document_chunks, index_chunks
 
-router = APIRouter(prefix="/api/v1/graph", tags=["graph"])
+router = APIRouter(prefix="/api/v1/graph", tags=["graph"], dependencies=[Depends(get_current_teacher)])
 
 
 class IngestResponse(BaseModel):
@@ -91,9 +93,23 @@ def list_documents() -> list[UploadedDocument]:
 
 @router.delete("/documents/{document_id}")
 def delete_document(document_id: str) -> dict:
-    if not get_document_store().remove(document_id):
+    store = get_document_store()
+    document = store.documents.get(document_id)
+    if document is None:
         raise HTTPException(status_code=404, detail="Document not found")
-    return {"deleted": document_id}
+
+    graph_store = get_graph_store()
+    cleanup = remove_document_from_graph(graph_store, document.filename)
+    if cleanup["nodes_removed"] or cleanup["edges_removed"]:
+        scores = graph_store.compute_pagerank()
+        for node_id, score in scores.items():
+            graph_store.graph.nodes[node_id]["importance_score"] = score
+    graph_store.save()
+
+    delete_document_chunks(document.filename)
+
+    store.remove(document_id)
+    return {"deleted": document_id, **cleanup}
 
 
 class GraphNodeOut(BaseModel):

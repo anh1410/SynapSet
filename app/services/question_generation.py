@@ -27,13 +27,52 @@ RELATED TOPICS (from the course knowledge graph):
 {co_section}
 Write {num_questions} {question_type} question(s) at Bloom's level "{bloom_level}" worth {marks} marks \
 each, about "{topic}".
+{difficulty_section}
+
+FORMAT RULES for {question_type}: {type_instruction}
+
 - Ground every question in the syllabus context provided.
 - Tag each question with the topic names it covers (topic_names): include "{topic}" and any related \
 topics from the list above that the question actually draws on.
 - If Course Outcomes were given, tag applicable co_codes; otherwise leave co_codes empty.
-- For MCQ questions, include exactly 4 options and correct_answer must exactly match one option.
-- For non-MCQ questions, leave options empty and correct_answer as a model answer or None.
 """
+
+QUESTION_TYPE_INSTRUCTIONS: dict[QuestionType, str] = {
+    QuestionType.MCQ: "Include exactly 4 options in `options` and `correct_answer` must exactly match one option.",
+    QuestionType.SHORT_ANSWER: "Leave `options` empty. Put a model answer (or key points) in `correct_answer`.",
+    QuestionType.LONG_ANSWER: "Leave `options` empty. Put a model answer (or key points) in `correct_answer`.",
+    QuestionType.NUMERICAL: "Leave `options` empty. Put the numeric answer in `correct_answer`.",
+    QuestionType.FILL_IN_BLANK: (
+        'Write the sentence in `text` with a literal "_____" placeholder marking the blank, include '
+        "exactly 4 plausible options in `options`, and `correct_answer` must exactly match one option "
+        "(the one that correctly fills the blank)."
+    ),
+    QuestionType.CODE_FIX: (
+        "Set `code_language` (e.g. \"python\"). Write a short instruction in `text` — e.g. \"Find and fix "
+        'the bug in this function\" or \"Fill in the missing line\" — describing what the student must do. '
+        "Put the buggy/incomplete code the student sees in `starter_code` (a real, runnable snippet with "
+        "one clear, specific bug or one missing line — not a vague description). Put the corrected, fully "
+        "working version of the code in `correct_answer`. Populate `test_cases` with 2-4 hidden "
+        "input/expected_output pairs that exercise the fixed behavior (input can be empty string if the "
+        "program takes no input) — these are used to auto-grade the student's submitted fix by running it. "
+        "Leave `options` empty."
+    ),
+}
+
+DIFFICULTY_GUIDANCE = {
+    "Easy": "Keep the question straightforward: test direct recall or a single-step "
+    "application of the syllabus context, with simple wording and no multi-part reasoning.",
+    "Medium": "Give the question moderate difficulty: require connecting two or more "
+    "concepts from the syllabus context, not just recall.",
+    "Hard": "Make the question challenging: require multi-step reasoning, synthesis "
+    "across several related concepts, or applying the material to an unfamiliar scenario.",
+}
+
+
+def _difficulty_section(target_difficulty: str | None) -> str:
+    if target_difficulty is None or target_difficulty not in DIFFICULTY_GUIDANCE:
+        return ""
+    return f"Target difficulty: {target_difficulty}. {DIFFICULTY_GUIDANCE[target_difficulty]}"
 
 
 def _context_text(topic: str, n_chunks: int = 5) -> str:
@@ -80,6 +119,7 @@ def generate_questions(
     bloom_level: BloomLevel = BloomLevel.UNDERSTAND,
     marks: int = 5,
     question_type: QuestionType = QuestionType.SHORT_ANSWER,
+    target_difficulty: str | None = None,
     course_outcomes: list[CourseOutcome] | None = None,
 ) -> list[Question]:
     """Generate exam questions for a topic, grounded in retrieved syllabus context
@@ -97,6 +137,8 @@ def generate_questions(
         question_type=question_type.value,
         bloom_level=bloom_level.name,
         marks=marks,
+        difficulty_section=_difficulty_section(target_difficulty),
+        type_instruction=QUESTION_TYPE_INSTRUCTIONS[question_type],
     )
 
     response = client.models.generate_content(
@@ -130,6 +172,9 @@ def generate_questions(
                 co_ids=draft.co_codes,
                 options=draft.options,
                 correct_answer=draft.correct_answer,
+                code_language=draft.code_language,
+                starter_code=draft.starter_code,
+                test_cases=draft.test_cases,
             )
         )
 

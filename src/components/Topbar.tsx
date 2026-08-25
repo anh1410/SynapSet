@@ -1,19 +1,26 @@
 import { useRef, useState } from "react";
-import { Menu, Search, Bell, Network, HelpCircle } from "lucide-react";
+import { Menu, Search, Bell, Network, HelpCircle, LogOut } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { fetchGraph, fetchQuestions, type GraphNode, type Question } from "@/lib/api";
+import { useAuth } from "@/lib/AuthContext";
 import type { Page } from "@/App";
 
 const titles: Record<Page, { title: string; subtitle: string }> = {
   overview: { title: "Overview", subtitle: "Your course content and question bank at a glance" },
   upload: { title: "Upload Materials", subtitle: "Add syllabus, notes, and past papers for analysis" },
   analysis: { title: "Topic Analysis", subtitle: "Coverage, relationships, and neglected areas" },
-  generate: { title: "Generate Questions", subtitle: "Create new questions grounded in your material" },
   bank: { title: "Question Bank", subtitle: "Browse and manage tagged questions" },
-  exam: { title: "Exam Builder", subtitle: "Assemble a paper against your constraints" },
-  review: { title: "Review & Export", subtitle: "Finalize and export the exam paper" },
+  exam: { title: "Exam Builder", subtitle: "Add questions one at a time and schedule your quiz" },
+  exams: { title: "Exams", subtitle: "Every quiz you've built — upcoming, live, and closed" },
 };
+
+function initialsFor(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
 
 export function Topbar({
   page,
@@ -27,6 +34,7 @@ export function Topbar({
   onSelectQuestion: (searchText: string) => void;
 }) {
   const { title, subtitle } = titles[page];
+  const { teacher, logout } = useAuth();
 
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -152,11 +160,18 @@ export function Topbar({
       </button>
 
       <div className="hidden items-center gap-2 border-l border-border pl-4 sm:flex">
-        <Avatar initials="AS" />
+        <Avatar initials={teacher ? initialsFor(teacher.name) : "?"} />
         <div className="text-xs">
-          <p className="font-medium text-foreground">Anagha Surathkal</p>
+          <p className="font-medium text-foreground">{teacher?.name ?? ""}</p>
           <p className="text-muted-foreground">Faculty</p>
         </div>
+        <button
+          onClick={logout}
+          title="Log out"
+          className="rounded-md p-1.5 text-muted-foreground transition-colors duration-200 hover:bg-secondary hover:text-foreground"
+        >
+          <LogOut className="h-4 w-4" />
+        </button>
       </div>
     </header>
   );
