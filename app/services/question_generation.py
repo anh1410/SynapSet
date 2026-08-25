@@ -11,6 +11,7 @@ from app.schemas.bloom import BloomLevel
 from app.schemas.course_outcome import CourseOutcome
 from app.schemas.generation import QuestionDraftBatch
 from app.schemas.question import Question, QuestionType
+from app.services.code_sandbox import CodeTimeoutError, UnsafeCodeError, run_code
 from app.services.vector_indexing import query_similar_chunks
 
 GENERATION_PROMPT = """You are an exam question writer for a university course. Write exam questions \
@@ -48,14 +49,21 @@ QUESTION_TYPE_INSTRUCTIONS: dict[QuestionType, str] = {
         "(the one that correctly fills the blank)."
     ),
     QuestionType.CODE_FIX: (
-        "Set `code_language` (e.g. \"python\"). Write a short instruction in `text` — e.g. \"Find and fix "
-        'the bug in this function\" or \"Fill in the missing line\" — describing what the student must do. '
-        "Put the buggy/incomplete code the student sees in `starter_code` (a real, runnable snippet with "
-        "one clear, specific bug or one missing line — not a vague description). Put the corrected, fully "
-        "working version of the code in `correct_answer`. Populate `test_cases` with 2-4 hidden "
-        "input/expected_output pairs that exercise the fixed behavior (input can be empty string if the "
-        "program takes no input) — these are used to auto-grade the student's submitted fix by running it. "
-        "Leave `options` empty."
+        "Set `code_language` to \"python\" (the only language the auto-grader currently runs). Write a "
+        'short instruction in `text` — e.g. "Find and fix the bug in this program" or "Fill in the missing '
+        'line" — describing what the student must do. '
+        "IMPORTANT — the auto-grader runs both `starter_code`'s corrected form and `correct_answer` as a "
+        "plain script and compares printed output, so the program MUST read its input (if any) via "
+        "`input()` and MUST print its final result via `print()` — do NOT write a bare function with a "
+        "`return` value and no I/O, since nothing would ever call it or show its result. "
+        "Put the buggy/incomplete script the student sees in `starter_code` (a real, runnable, "
+        "input()/print()-driven snippet with one clear, specific bug or one missing line — not a vague "
+        "description). Put the corrected, fully working version of the SAME script in `correct_answer` "
+        "— it must produce exactly the outputs listed in `test_cases` when run. Populate `test_cases` with "
+        "2-4 hidden input/expected_output pairs (input is the exact text fed to the program's input() "
+        "calls, one value per line if there are several; use an empty string if the program takes no "
+        "input) that exercise the fixed behavior — these are used to auto-grade the student's submitted "
+        "fix by running it and comparing stdout. Leave `options` empty."
     ),
 }
 
@@ -104,6 +112,24 @@ def _co_section(course_outcomes: list[CourseOutcome] | None) -> str:
         return ""
     listed = "\n".join(f"- {co.code}: {co.description}" for co in course_outcomes)
     return f"COURSE OUTCOMES (tag co_codes from this list only):\n{listed}\n"
+
+
+def _reference_solution_passes(question: Question) -> bool:
+    """Sanity-checks a code_fix draft by running its own reference solution
+    against its own test cases before it ever reaches a student — catches
+    the LLM writing an inconsistent solution/test-case pair. A draft that
+    fails this is dropped rather than surfaced, mirroring how a bad diagram
+    or empty worksheet grid gets dropped elsewhere in this pipeline."""
+    if not question.correct_answer or not question.test_cases:
+        return False
+    for case in question.test_cases:
+        try:
+            actual = run_code(question.correct_answer, case.input).strip()
+        except (UnsafeCodeError, CodeTimeoutError):
+            return False
+        if actual != case.expected_output.strip():
+            return False
+    return True
 
 
 @retry(
@@ -161,21 +187,22 @@ def generate_questions(
             for name in draft.topic_names
             if normalize_topic_name(name) in graph
         ]
-        questions.append(
-            Question(
-                id=str(uuid.uuid4()),
-                text=draft.text,
-                question_type=draft.question_type,
-                marks=draft.marks,
-                bloom_level=BloomLevel[draft.bloom_level],
-                topic_ids=topic_ids,
-                co_ids=draft.co_codes,
-                options=draft.options,
-                correct_answer=draft.correct_answer,
-                code_language=draft.code_language,
-                starter_code=draft.starter_code,
-                test_cases=draft.test_cases,
-            )
+        question = Question(
+            id=str(uuid.uuid4()),
+            text=draft.text,
+            question_type=draft.question_type,
+            marks=draft.marks,
+            bloom_level=BloomLevel[draft.bloom_level],
+            topic_ids=topic_ids,
+            co_ids=draft.co_codes,
+            options=draft.options,
+            correct_answer=draft.correct_answer,
+            code_language=draft.code_language,
+            starter_code=draft.starter_code,
+            test_cases=draft.test_cases,
         )
+        if question.question_type == QuestionType.CODE_FIX and not _reference_solution_passes(question):
+            continue
+        questions.append(question)
 
     return questions

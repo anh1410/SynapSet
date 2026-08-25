@@ -142,3 +142,38 @@ def test_save_and_delete_question(api_client):
 def test_delete_document_not_found(api_client):
     r = api_client.delete("/api/v1/graph/documents/does-not-exist")
     assert r.status_code == 404
+
+
+def test_grade_endpoint_mcq(api_client):
+    from app.core.question_bank import get_question_bank
+
+    get_question_bank().add(
+        Question(
+            id="mcq-1",
+            text="2+2?",
+            question_type=QuestionType.MCQ,
+            marks=1,
+            bloom_level=BloomLevel.REMEMBER,
+            options=["3", "4"],
+            correct_answer="4",
+        )
+    )
+    r = api_client.post("/api/v1/questions/mcq-1/grade", json={"answer": "4"})
+    assert r.status_code == 200
+    assert r.json()["correct"] is True
+    assert r.json()["marks_awarded"] == 1
+
+
+def test_grade_endpoint_short_answer_rejected(api_client):
+    from app.core.question_bank import get_question_bank
+
+    get_question_bank().add(
+        Question(id="sa-1", text="Explain X.", question_type=QuestionType.SHORT_ANSWER, marks=5, bloom_level=BloomLevel.UNDERSTAND)
+    )
+    r = api_client.post("/api/v1/questions/sa-1/grade", json={"answer": "some text"})
+    assert r.status_code == 400
+
+
+def test_grade_endpoint_question_not_found(api_client):
+    r = api_client.post("/api/v1/questions/does-not-exist/grade", json={"answer": "x"})
+    assert r.status_code == 404

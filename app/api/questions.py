@@ -10,9 +10,11 @@ from app.schemas.bloom import BloomLevel
 from app.schemas.course_outcome import CourseOutcome
 from app.schemas.difficulty import DifficultyScore
 from app.schemas.duplicate import DuplicateMatch
+from app.schemas.grading import GradeResult
 from app.schemas.question import Question, QuestionType
 from app.services.difficulty_scoring import score_difficulty
 from app.services.duplicate_detection import find_duplicates
+from app.services.grading import AUTO_GRADABLE_TYPES, grade_answer
 from app.services.question_generation import generate_questions
 
 router = APIRouter(prefix="/api/v1/questions", tags=["questions"], dependencies=[Depends(get_current_teacher)])
@@ -106,3 +108,21 @@ def delete_question(question_id: str) -> dict:
     if not get_question_bank().remove(question_id):
         raise HTTPException(status_code=404, detail="Question not found")
     return {"deleted": question_id}
+
+
+class GradeAnswerRequest(BaseModel):
+    answer: str
+
+
+@router.post("/{question_id}/grade", response_model=GradeResult)
+def grade_question_answer(question_id: str, request: GradeAnswerRequest) -> GradeResult:
+    """Auto-grades a submitted answer against this question. For code_fix,
+    runs the submission in a sandbox against the question's hidden test
+    cases; for mcq/fill_in_blank/numerical, does an exact-match check.
+    short_answer/long_answer aren't auto-gradable and return 400."""
+    question = get_question_bank().get(question_id)
+    if question is None:
+        raise HTTPException(status_code=404, detail="Question not found")
+    if question.question_type not in AUTO_GRADABLE_TYPES:
+        raise HTTPException(status_code=400, detail=f"{question.question_type.value} questions require manual grading")
+    return grade_answer(question, request.answer)
