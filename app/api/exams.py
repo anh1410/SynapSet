@@ -4,7 +4,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app.api.deps import get_current_teacher
+from app.api.deps import get_current_teacher, require_subject
 from app.core.exam_store import get_exam_store
 from app.core.question_bank import get_question_bank
 from app.core.submission_store import get_submission_store
@@ -24,6 +24,7 @@ def _require_owner(exam_id: str, teacher: Teacher) -> Exam:
 
 
 class CreateExamRequest(BaseModel):
+    subject_id: str
     name: str
     question_ids: list[str] = []
     total_marks: int = 0
@@ -32,9 +33,11 @@ class CreateExamRequest(BaseModel):
 
 @router.post("", response_model=Exam)
 def create_exam(request: CreateExamRequest, teacher: Teacher = Depends(get_current_teacher)) -> Exam:
+    require_subject(request.subject_id, teacher)
     exam = Exam(
         id=str(uuid.uuid4()),
         teacher_id=teacher.id,
+        subject_id=request.subject_id,
         name=request.name,
         question_ids=request.question_ids,
         total_marks=request.total_marks,
@@ -45,8 +48,9 @@ def create_exam(request: CreateExamRequest, teacher: Teacher = Depends(get_curre
 
 
 @router.get("", response_model=list[Exam])
-def list_exams(teacher: Teacher = Depends(get_current_teacher)) -> list[Exam]:
-    return get_exam_store().list_by_teacher(teacher.id)
+def list_exams(subject_id: str, teacher: Teacher = Depends(get_current_teacher)) -> list[Exam]:
+    require_subject(subject_id, teacher)
+    return get_exam_store().list_by_subject(subject_id)
 
 
 class ExamDetail(BaseModel):
@@ -57,7 +61,7 @@ class ExamDetail(BaseModel):
 @router.get("/{exam_id}", response_model=ExamDetail)
 def get_exam(exam_id: str, teacher: Teacher = Depends(get_current_teacher)) -> ExamDetail:
     exam = _require_owner(exam_id, teacher)
-    bank = get_question_bank()
+    bank = get_question_bank(exam.subject_id)
     questions = [q for qid in exam.question_ids if (q := bank.get(qid)) is not None]
     return ExamDetail(exam=exam, questions=questions)
 

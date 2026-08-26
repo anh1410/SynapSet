@@ -24,21 +24,20 @@ class Settings(BaseSettings):
     neo4j_user: str = ""
     neo4j_password: str = ""
 
-    # Vector store (ChromaDB)
+    # Vector store (ChromaDB) — one collection per subject
     chroma_persist_dir: str = str(BASE_DIR / "data" / "chroma")
-    chroma_collection_name: str = "syllabus_chunks"
 
     # File storage
     upload_dir: str = str(BASE_DIR / "data" / "uploads")
 
-    # Graph storage (used when Neo4j is not configured)
-    graph_store_path: str = str(BASE_DIR / "data" / "knowledge_graph.gpickle")
+    # Graph storage (used when Neo4j is not configured) — one pickle file per subject
+    graph_store_dir: str = str(BASE_DIR / "data" / "graphs")
 
-    # Question bank storage
-    question_bank_path: str = str(BASE_DIR / "data" / "question_bank.json")
+    # Question bank storage — one JSON file per subject
+    question_bank_dir: str = str(BASE_DIR / "data" / "question_banks")
 
-    # Uploaded document registry
-    document_store_path: str = str(BASE_DIR / "data" / "documents.json")
+    # Uploaded document registry — one JSON file per subject
+    document_store_dir: str = str(BASE_DIR / "data" / "documents")
 
     # Saved exams (weekly quizzes)
     exam_store_path: str = str(BASE_DIR / "data" / "exams.json")
@@ -48,6 +47,9 @@ class Settings(BaseSettings):
 
     # Teacher accounts
     teacher_store_path: str = str(BASE_DIR / "data" / "teachers.json")
+
+    # Subjects (each teacher's separate, isolated workspaces)
+    subject_store_path: str = str(BASE_DIR / "data" / "subjects.json")
 
     # Auth
     jwt_secret: str = "dev-secret-change-me"

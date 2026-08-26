@@ -49,6 +49,8 @@ class QuestionBank:
 
 
 @lru_cache
-def get_question_bank() -> QuestionBank:
+def get_question_bank(subject_id: str) -> QuestionBank:
+    """One question bank per subject, so generated questions never leak across subjects."""
     settings = get_settings()
-    return QuestionBank(settings.question_bank_path)
+    path = Path(settings.question_bank_dir) / f"{subject_id}.json"
+    return QuestionBank(str(path))

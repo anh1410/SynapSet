@@ -1,16 +1,16 @@
-import shutil
 import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from app.api.deps import get_current_teacher
+from app.api.deps import get_current_teacher, require_subject
 from app.core.config import get_settings
 from app.core.document_store import get_document_store
 from app.core.graph_store import get_graph_store
 from app.core.question_bank import get_question_bank
 from app.schemas.document import DocumentCategory, UploadedDocument
+from app.schemas.teacher import Teacher
 from app.services.document_cleanup import remove_document_from_graph
 from app.services.document_extraction import extract_and_chunk, extract_and_chunk_for_extraction
 from app.services.entity_extraction import extract_from_chunk, merge_into_graph
@@ -30,11 +30,14 @@ class IngestResponse(BaseModel):
 
 @router.post("/ingest", response_model=IngestResponse)
 async def ingest_document(
+    subject_id: str = Form(...),
     file: UploadFile = File(...),
     category: DocumentCategory = Form(...),
     course_outcomes: str | None = Form(None, description="Comma-separated CO codes, e.g. 'CO1,CO2'"),
+    teacher: Teacher = Depends(get_current_teacher),
 ) -> IngestResponse:
     """Upload a syllabus/notes/question-paper file, index it for retrieval, and extend the knowledge graph."""
+    require_subject(subject_id, teacher)
     settings = get_settings()
     upload_dir = Path(settings.upload_dir)
     upload_dir.mkdir(parents=True, exist_ok=True)
@@ -43,7 +46,7 @@ async def ingest_document(
     contents = await file.read()
     dest.write_bytes(contents)
 
-    doc_store = get_document_store()
+    doc_store = get_document_store(subject_id)
     document = UploadedDocument(
         id=str(uuid.uuid4()), filename=file.filename, category=category, size_bytes=len(contents)
     )
@@ -53,10 +56,10 @@ async def ingest_document(
         co_list = [c.strip() for c in course_outcomes.split(",") if c.strip()] if course_outcomes else None
 
         retrieval_chunks = extract_and_chunk(str(dest))
-        index_chunks(retrieval_chunks)
+        index_chunks(retrieval_chunks, subject_id)
 
         extraction_chunks = extract_and_chunk_for_extraction(str(dest))
-        graph_store = get_graph_store()
+        graph_store = get_graph_store(subject_id)
         nodes_before = set(graph_store.graph.nodes)
         for chunk in extraction_chunks:
             result = extract_from_chunk(chunk, course_outcomes=co_list)
@@ -87,18 +90,20 @@ async def ingest_document(
 
 
 @router.get("/documents", response_model=list[UploadedDocument])
-def list_documents() -> list[UploadedDocument]:
-    return get_document_store().list()
+def list_documents(subject_id: str, teacher: Teacher = Depends(get_current_teacher)) -> list[UploadedDocument]:
+    require_subject(subject_id, teacher)
+    return get_document_store(subject_id).list()
 
 
 @router.delete("/documents/{document_id}")
-def delete_document(document_id: str) -> dict:
-    store = get_document_store()
+def delete_document(document_id: str, subject_id: str, teacher: Teacher = Depends(get_current_teacher)) -> dict:
+    require_subject(subject_id, teacher)
+    store = get_document_store(subject_id)
     document = store.documents.get(document_id)
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    graph_store = get_graph_store()
+    graph_store = get_graph_store(subject_id)
     cleanup = remove_document_from_graph(graph_store, document.filename)
     if cleanup["nodes_removed"] or cleanup["edges_removed"]:
         scores = graph_store.compute_pagerank()
@@ -106,7 +111,7 @@ def delete_document(document_id: str) -> dict:
             graph_store.graph.nodes[node_id]["importance_score"] = score
     graph_store.save()
 
-    delete_document_chunks(document.filename)
+    delete_document_chunks(subject_id, document.filename)
 
     store.remove(document_id)
     return {"deleted": document_id, **cleanup}
@@ -135,11 +140,12 @@ class GraphResponse(BaseModel):
 
 
 @router.get("", response_model=GraphResponse)
-def get_graph() -> GraphResponse:
+def get_graph(subject_id: str, teacher: Teacher = Depends(get_current_teacher)) -> GraphResponse:
     """Full knowledge graph enriched with question-bank coverage stats per topic."""
-    graph_store = get_graph_store()
+    require_subject(subject_id, teacher)
+    graph_store = get_graph_store(subject_id)
     graph = graph_store.graph
-    bank = get_question_bank()
+    bank = get_question_bank(subject_id)
 
     question_counts: dict[str, int] = {}
     for q in bank.list():
@@ -179,8 +185,9 @@ class DedupeTopicsResponse(BaseModel):
 
 
 @router.post("/dedupe-topics", response_model=DedupeTopicsResponse)
-def dedupe_topics() -> DedupeTopicsResponse:
+def dedupe_topics(subject_id: str, teacher: Teacher = Depends(get_current_teacher)) -> DedupeTopicsResponse:
     """Merge near-duplicate topic nodes (e.g. singular/plural variants from
     repeated ingestion) into a single canonical node."""
-    result = merge_duplicate_topics(get_graph_store(), get_question_bank())
+    require_subject(subject_id, teacher)
+    result = merge_duplicate_topics(get_graph_store(subject_id), get_question_bank(subject_id))
     return DedupeTopicsResponse(**result)

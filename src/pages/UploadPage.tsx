@@ -25,6 +25,7 @@ import {
   type DocumentCategory,
   type UploadedDocument,
 } from "@/lib/api";
+import { useAuth } from "@/lib/AuthContext";
 import { cn } from "@/lib/utils";
 
 const categories: { id: DocumentCategory; label: string; icon: typeof BookOpen; description: string }[] = [
@@ -46,6 +47,7 @@ const categoryLabels: Record<DocumentCategory, string> = {
 };
 
 export function UploadPage() {
+  const { activeSubjectId } = useAuth();
   const [dragOver, setDragOver] = useState<DocumentCategory | null>(null);
   const [documents, setDocuments] = useState<UploadedDocument[]>([]);
   const [loading, setLoading] = useState(true);
@@ -58,19 +60,21 @@ export function UploadPage() {
   });
 
   const load = () => {
-    fetchDocuments()
+    if (!activeSubjectId) return;
+    fetchDocuments(activeSubjectId)
       .then(setDocuments)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   };
 
-  useEffect(load, []);
+  useEffect(load, [activeSubjectId]);
 
   const handleUpload = async (category: DocumentCategory, file: File) => {
+    if (!activeSubjectId) return;
     setUploading(category);
     setError(null);
     try {
-      await ingestDocument(file, category);
+      await ingestDocument(file, category, activeSubjectId);
       load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Upload failed");
@@ -80,8 +84,9 @@ export function UploadPage() {
   };
 
   const handleDelete = async (id: string) => {
+    if (!activeSubjectId) return;
     try {
-      await deleteDocument(id);
+      await deleteDocument(activeSubjectId, id);
       setDocuments((docs) => docs.filter((d) => d.id !== id));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Delete failed");

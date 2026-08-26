@@ -7,7 +7,7 @@ from app.schemas.question import CodeTestCase, Question, QuestionType
 def _seed_mcq_question(api_client, qid="mcq-1"):
     from app.core.question_bank import get_question_bank
 
-    get_question_bank().add(
+    get_question_bank(api_client.subject_id).add(
         Question(
             id=qid,
             text="2+2?",
@@ -24,7 +24,7 @@ def _seed_mcq_question(api_client, qid="mcq-1"):
 def _seed_code_question(api_client, qid="code-1"):
     from app.core.question_bank import get_question_bank
 
-    get_question_bank().add(
+    get_question_bank(api_client.subject_id).add(
         Question(
             id=qid,
             text="Fix the doubler",
@@ -43,7 +43,12 @@ def _seed_code_question(api_client, qid="code-1"):
 def _create_live_exam(api_client, question_ids, password=""):
     r = api_client.post(
         "/api/v1/exams",
-        json={"name": "Quiz", "question_ids": question_ids, "total_marks": sum(1 for _ in question_ids) * 2},
+        json={
+            "subject_id": api_client.subject_id,
+            "name": "Quiz",
+            "question_ids": question_ids,
+            "total_marks": sum(1 for _ in question_ids) * 2,
+        },
     )
     exam_id = r.json()["id"]
     past = (datetime.now(UTC) - timedelta(minutes=5)).isoformat()
@@ -77,7 +82,9 @@ def test_verify_password_wrong_rejected(api_client):
 
 def test_verify_password_not_live_yet_rejected(api_client):
     qid = _seed_mcq_question(api_client)
-    r = api_client.post("/api/v1/exams", json={"name": "Future Quiz", "question_ids": [qid]})
+    r = api_client.post(
+        "/api/v1/exams", json={"subject_id": api_client.subject_id, "name": "Future Quiz", "question_ids": [qid]}
+    )
     exam_id = r.json()["id"]
     future = (datetime.now(UTC) + timedelta(days=1)).isoformat()
     api_client.patch(f"/api/v1/exams/{exam_id}", json={"go_live_at": future})

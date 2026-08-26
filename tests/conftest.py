@@ -57,14 +57,16 @@ def sample_questions():
 @pytest.fixture
 def api_client(tmp_path, monkeypatch):
     """A TestClient wired to isolated, per-test storage (graph/bank/chroma/uploads/exams),
-    authenticated as a freshly signed-up test teacher, so API tests never touch real
-    project data and don't have to handle auth themselves."""
-    monkeypatch.setenv("GRAPH_STORE_PATH", str(tmp_path / "graph.gpickle"))
-    monkeypatch.setenv("QUESTION_BANK_PATH", str(tmp_path / "bank.json"))
-    monkeypatch.setenv("DOCUMENT_STORE_PATH", str(tmp_path / "documents.json"))
+    authenticated as a freshly signed-up test teacher with one default subject already
+    created (client.subject_id), so API tests never touch real project data and don't
+    have to handle auth/subject setup themselves."""
+    monkeypatch.setenv("GRAPH_STORE_DIR", str(tmp_path / "graphs"))
+    monkeypatch.setenv("QUESTION_BANK_DIR", str(tmp_path / "question_banks"))
+    monkeypatch.setenv("DOCUMENT_STORE_DIR", str(tmp_path / "documents"))
     monkeypatch.setenv("EXAM_STORE_PATH", str(tmp_path / "exams.json"))
     monkeypatch.setenv("SUBMISSION_STORE_PATH", str(tmp_path / "submissions.json"))
     monkeypatch.setenv("TEACHER_STORE_PATH", str(tmp_path / "teachers.json"))
+    monkeypatch.setenv("SUBJECT_STORE_PATH", str(tmp_path / "subjects.json"))
     monkeypatch.setenv("CHROMA_PERSIST_DIR", str(tmp_path / "chroma"))
     monkeypatch.setenv("UPLOAD_DIR", str(tmp_path / "uploads"))
 
@@ -73,6 +75,7 @@ def api_client(tmp_path, monkeypatch):
     from app.core.exam_store import get_exam_store
     from app.core.graph_store import get_graph_store
     from app.core.question_bank import get_question_bank
+    from app.core.subject_store import get_subject_store
     from app.core.submission_store import get_submission_store
     from app.core.teacher_store import get_teacher_store
     from app.core.vector_store import get_chroma_client
@@ -85,6 +88,7 @@ def api_client(tmp_path, monkeypatch):
         get_exam_store,
         get_submission_store,
         get_teacher_store,
+        get_subject_store,
         get_chroma_client,
     )
     for cached in cached_fns:
@@ -98,6 +102,8 @@ def api_client(tmp_path, monkeypatch):
             json={"email": "teacher@test.local", "password": "test-password-123", "name": "Test Teacher"},
         )
         client.headers.update({"Authorization": f"Bearer {signup.json()['access_token']}"})
+        subject = client.post("/api/v1/subjects", json={"name": "Test Subject"})
+        client.subject_id = subject.json()["id"]
         yield client
 
     for cached in cached_fns:

@@ -23,6 +23,7 @@ import {
   type UploadedDocument,
   type Exam,
 } from "@/lib/api";
+import { useAuth } from "@/lib/AuthContext";
 import type { Page } from "@/App";
 
 type Activity = {
@@ -34,6 +35,7 @@ type Activity = {
 };
 
 export function OverviewPage({ onNavigate }: { onNavigate: (p: Page) => void }) {
+  const { activeSubjectId } = useAuth();
   const [nodes, setNodes] = useState<GraphNode[]>([]);
   const [documents, setDocuments] = useState<UploadedDocument[]>([]);
   const [questionCount, setQuestionCount] = useState(0);
@@ -41,15 +43,17 @@ export function OverviewPage({ onNavigate }: { onNavigate: (p: Page) => void }) 
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!activeSubjectId) return;
+    setLoading(true);
     Promise.all([
-      fetchGraph().then((g) => setNodes(g.nodes)),
-      fetchDocuments().then(setDocuments),
-      fetchQuestions().then((qs) => setQuestionCount(qs.length)),
-      listExams().then(setExams),
+      fetchGraph(activeSubjectId).then((g) => setNodes(g.nodes)),
+      fetchDocuments(activeSubjectId).then(setDocuments),
+      fetchQuestions(activeSubjectId).then((qs) => setQuestionCount(qs.length)),
+      listExams(activeSubjectId).then(setExams),
     ])
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  }, [activeSubjectId]);
 
   if (loading) {
     return (

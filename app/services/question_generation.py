@@ -28,7 +28,6 @@ RELATED TOPICS (from the course knowledge graph):
 {co_section}
 Write {num_questions} {question_type} question(s) at Bloom's level "{bloom_level}" worth {marks} marks \
 each, about "{topic}".
-{difficulty_section}
 
 FORMAT RULES for {question_type}: {type_instruction}
 
@@ -67,24 +66,9 @@ QUESTION_TYPE_INSTRUCTIONS: dict[QuestionType, str] = {
     ),
 }
 
-DIFFICULTY_GUIDANCE = {
-    "Easy": "Keep the question straightforward: test direct recall or a single-step "
-    "application of the syllabus context, with simple wording and no multi-part reasoning.",
-    "Medium": "Give the question moderate difficulty: require connecting two or more "
-    "concepts from the syllabus context, not just recall.",
-    "Hard": "Make the question challenging: require multi-step reasoning, synthesis "
-    "across several related concepts, or applying the material to an unfamiliar scenario.",
-}
 
-
-def _difficulty_section(target_difficulty: str | None) -> str:
-    if target_difficulty is None or target_difficulty not in DIFFICULTY_GUIDANCE:
-        return ""
-    return f"Target difficulty: {target_difficulty}. {DIFFICULTY_GUIDANCE[target_difficulty]}"
-
-
-def _context_text(topic: str, n_chunks: int = 5) -> str:
-    hits = query_similar_chunks(topic, n_results=n_chunks)
+def _context_text(topic: str, subject_id: str, n_chunks: int = 5) -> str:
+    hits = query_similar_chunks(topic, subject_id, n_results=n_chunks)
     if not hits:
         return "(no indexed syllabus content found for this topic)"
     return "\n\n".join(f"[{h['metadata'].get('source_document')}] {h['text']}" for h in hits)
@@ -132,38 +116,71 @@ def _reference_solution_passes(question: Question) -> bool:
     return True
 
 
+def generate_questions(
+    topic: str,
+    graph_store: KnowledgeGraphStore,
+    subject_id: str,
+    num_questions: int = 3,
+    bloom_level: BloomLevel = BloomLevel.UNDERSTAND,
+    marks: int = 5,
+    question_type: QuestionType = QuestionType.SHORT_ANSWER,
+    course_outcomes: list[CourseOutcome] | None = None,
+) -> list[Question]:
+    """Generate exam questions for a topic, grounded in retrieved syllabus context
+    and augmented with the topic's prerequisite/CO relationships from the knowledge graph.
+
+    code_fix drafts that fail their own reference-solution check (see
+    _reference_solution_passes) are dropped by _generate_questions_once. For a
+    single-question request that means one bad LLM draft returns nothing at
+    all, so retry the whole generation call a couple of times in that specific
+    case rather than surfacing "no question returned" to the teacher.
+    """
+    attempts = 3 if question_type == QuestionType.CODE_FIX else 1
+    questions: list[Question] = []
+    for _ in range(attempts):
+        questions = _generate_questions_once(
+            topic=topic,
+            graph_store=graph_store,
+            subject_id=subject_id,
+            num_questions=num_questions,
+            bloom_level=bloom_level,
+            marks=marks,
+            question_type=question_type,
+            course_outcomes=course_outcomes,
+        )
+        if questions:
+            break
+    return questions
+
+
 @retry(
     retry=retry_if_exception_type((errors.ServerError, errors.APIError, httpx.TransportError)),
     stop=stop_after_attempt(4),
     wait=wait_exponential(multiplier=2, min=2, max=30),
     reraise=True,
 )
-def generate_questions(
+def _generate_questions_once(
     topic: str,
     graph_store: KnowledgeGraphStore,
-    num_questions: int = 3,
-    bloom_level: BloomLevel = BloomLevel.UNDERSTAND,
-    marks: int = 5,
-    question_type: QuestionType = QuestionType.SHORT_ANSWER,
-    target_difficulty: str | None = None,
-    course_outcomes: list[CourseOutcome] | None = None,
+    subject_id: str,
+    num_questions: int,
+    bloom_level: BloomLevel,
+    marks: int,
+    question_type: QuestionType,
+    course_outcomes: list[CourseOutcome] | None,
 ) -> list[Question]:
-    """Generate exam questions for a topic, grounded in retrieved syllabus context
-    and augmented with the topic's prerequisite/CO relationships from the knowledge graph.
-    """
     settings = get_settings()
     client = get_genai_client()
 
     prompt = GENERATION_PROMPT.format(
         topic=topic,
-        context=_context_text(topic),
+        context=_context_text(topic, subject_id),
         related_topics=_related_topics_text(topic, graph_store),
         co_section=_co_section(course_outcomes),
         num_questions=num_questions,
         question_type=question_type.value,
         bloom_level=bloom_level.name,
         marks=marks,
-        difficulty_section=_difficulty_section(target_difficulty),
         type_instruction=QUESTION_TYPE_INSTRUCTIONS[question_type],
     )
 

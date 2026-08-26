@@ -1,11 +1,12 @@
 import { Fragment, useEffect, useState } from "react";
-import { FileStack, Clock, Lock, LockOpen, Pencil, Trash2, XCircle, CalendarClock, BarChart3 } from "lucide-react";
+import { FileStack, Clock, Lock, LockOpen, Pencil, Trash2, XCircle, CalendarClock, BarChart3, KeyRound } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import { deleteExam, listExams, updateExam, type Exam, type ExamBucket } from "@/lib/api";
+import { useAuth } from "@/lib/AuthContext";
 
 const bucketOrder: ExamBucket[] = ["live", "upcoming", "draft", "closed"];
 const bucketLabels: Record<ExamBucket, string> = {
@@ -21,16 +22,27 @@ const bucketVariant: Record<ExamBucket, "success" | "accent" | "secondary" | "ou
   closed: "outline",
 };
 
-export function ExamsPage({ onEdit, onViewResults }: { onEdit: (examId: string) => void; onViewResults: (examId: string) => void }) {
+export function ExamsPage({
+  onEdit,
+  onViewResults,
+  onViewAnswerKey,
+}: {
+  onEdit: (examId: string) => void;
+  onViewResults: (examId: string) => void;
+  onViewAnswerKey: (examId: string) => void;
+}) {
+  const { activeSubjectId } = useAuth();
   const [exams, setExams] = useState<Exam[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
 
   useEffect(() => {
-    listExams()
+    if (!activeSubjectId) return;
+    setLoading(true);
+    listExams(activeSubjectId)
       .then(setExams)
       .finally(() => setLoading(false));
-  }, []);
+  }, [activeSubjectId]);
 
   const handleClose = async (id: string) => {
     setBusyId(id);
@@ -127,6 +139,11 @@ export function ExamsPage({ onEdit, onViewResults }: { onEdit: (examId: string) 
                       {(exam.bucket === "live" || exam.bucket === "closed") && (
                         <Button size="sm" variant="outline" onClick={() => onViewResults(exam.id)}>
                           <BarChart3 className="h-3.5 w-3.5" /> Results
+                        </Button>
+                      )}
+                      {exam.question_ids.length > 0 && (
+                        <Button size="sm" variant="outline" onClick={() => onViewAnswerKey(exam.id)}>
+                          <KeyRound className="h-3.5 w-3.5" /> Answer Key
                         </Button>
                       )}
                       {exam.bucket !== "closed" && exam.bucket !== "draft" && (

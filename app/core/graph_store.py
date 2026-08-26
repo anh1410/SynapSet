@@ -62,6 +62,8 @@ def get_neo4j_driver():
 
 
 @lru_cache
-def get_graph_store() -> KnowledgeGraphStore:
+def get_graph_store(subject_id: str) -> KnowledgeGraphStore:
+    """One knowledge graph per subject, so topics/relations never leak across subjects."""
     settings = get_settings()
-    return KnowledgeGraphStore(settings.graph_store_path)
+    path = Path(settings.graph_store_dir) / f"{subject_id}.gpickle"
+    return KnowledgeGraphStore(str(path))

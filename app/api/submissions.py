@@ -37,7 +37,7 @@ def verify_password(exam_id: str, request: VerifyPasswordRequest) -> PublicExam:
     if exam.password and request.password != exam.password:
         raise HTTPException(status_code=401, detail="Incorrect password")
 
-    bank = get_question_bank()
+    bank = get_question_bank(exam.subject_id)
     questions = [q for qid in exam.question_ids if (q := bank.get(qid)) is not None]
     return PublicExam(
         id=exam.id,
@@ -65,7 +65,7 @@ def submit_exam(exam_id: str, request: SubmitExamRequest) -> Submission:
     if exam.password and request.password != exam.password:
         raise HTTPException(status_code=401, detail="Incorrect password")
 
-    bank = get_question_bank()
+    bank = get_question_bank(exam.subject_id)
     answers_by_qid = {a.question_id: a.answer for a in request.answers}
 
     graded: list[GradedAnswer] = []

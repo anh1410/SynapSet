@@ -8,6 +8,7 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import { dedupeTopics, fetchGraph, type GraphEdge, type GraphNode } from "@/lib/api";
+import { useAuth } from "@/lib/AuthContext";
 import { cn } from "@/lib/utils";
 
 function computeLayout(nodes: GraphNode[]): Record<string, { x: number; y: number }> {
@@ -22,6 +23,7 @@ function computeLayout(nodes: GraphNode[]): Record<string, { x: number; y: numbe
 }
 
 export function AnalysisPage() {
+  const { activeSubjectId } = useAuth();
   const [nodes, setNodes] = useState<GraphNode[]>([]);
   const [edges, setEdges] = useState<GraphEdge[]>([]);
   const [loading, setLoading] = useState(true);
@@ -30,7 +32,9 @@ export function AnalysisPage() {
   const [dedupeMessage, setDedupeMessage] = useState<string | null>(null);
 
   const loadGraph = () => {
-    fetchGraph()
+    if (!activeSubjectId) return;
+    setLoading(true);
+    fetchGraph(activeSubjectId)
       .then((g) => {
         setNodes(g.nodes);
         setEdges(g.edges);
@@ -38,13 +42,14 @@ export function AnalysisPage() {
       .finally(() => setLoading(false));
   };
 
-  useEffect(loadGraph, []);
+  useEffect(loadGraph, [activeSubjectId]);
 
   const handleDedupe = async () => {
+    if (!activeSubjectId) return;
     setDeduping(true);
     setDedupeMessage(null);
     try {
-      const result = await dedupeTopics();
+      const result = await dedupeTopics(activeSubjectId);
       setDedupeMessage(
         result.merged_groups === 0
           ? "No duplicate topics found."

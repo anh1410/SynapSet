@@ -40,6 +40,8 @@ class DocumentStore:
 
 
 @lru_cache
-def get_document_store() -> DocumentStore:
+def get_document_store(subject_id: str) -> DocumentStore:
+    """One document registry per subject, so uploads never leak across subjects."""
     settings = get_settings()
-    return DocumentStore(settings.document_store_path)
+    path = Path(settings.document_store_dir) / f"{subject_id}.json"
+    return DocumentStore(str(path))

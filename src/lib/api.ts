@@ -40,7 +40,6 @@ export const QUESTION_TYPE_ORDER: QuestionType[] = [
 ];
 
 export type Difficulty = "Easy" | "Medium" | "Hard";
-export const DIFFICULTY_LEVELS: Difficulty[] = ["Easy", "Medium", "Hard"];
 
 // ---------- Core resources ----------
 
@@ -128,6 +127,27 @@ export interface UploadedDocument {
   uploaded_at: string;
 }
 
+// ---------- Subjects ----------
+
+export interface Subject {
+  id: string;
+  teacher_id: string;
+  name: string;
+  created_at: string;
+}
+
+export function listSubjects() {
+  return apiFetch<Subject[]>("/subjects");
+}
+
+export function createSubject(name: string) {
+  return apiFetch<Subject>("/subjects", { method: "POST", body: JSON.stringify({ name }) });
+}
+
+export function deleteSubject(id: string) {
+  return apiFetch<{ deleted: string }>(`/subjects/${id}`, { method: "DELETE" });
+}
+
 // ---------- Exams (weekly quizzes) ----------
 
 export type ExamStatus = "draft" | "scheduled" | "closed";
@@ -136,6 +156,7 @@ export type ExamBucket = "draft" | "upcoming" | "live" | "closed";
 export interface Exam {
   id: string;
   teacher_id: string;
+  subject_id: string;
   name: string;
   question_ids: string[];
   total_marks: number;
@@ -208,16 +229,18 @@ export function me() {
 
 // ---------- Graph & documents ----------
 
-export function fetchGraph() {
-  return apiFetch<GraphResponse>("/graph");
+export function fetchGraph(subjectId: string) {
+  return apiFetch<GraphResponse>(`/graph?subject_id=${encodeURIComponent(subjectId)}`);
 }
 
-export function fetchDocuments() {
-  return apiFetch<UploadedDocument[]>("/graph/documents");
+export function fetchDocuments(subjectId: string) {
+  return apiFetch<UploadedDocument[]>(`/graph/documents?subject_id=${encodeURIComponent(subjectId)}`);
 }
 
-export function deleteDocument(id: string) {
-  return apiFetch<{ deleted: string }>(`/graph/documents/${id}`, { method: "DELETE" });
+export function deleteDocument(subjectId: string, id: string) {
+  return apiFetch<{ deleted: string }>(`/graph/documents/${id}?subject_id=${encodeURIComponent(subjectId)}`, {
+    method: "DELETE",
+  });
 }
 
 export interface IngestResult {
@@ -228,10 +251,11 @@ export interface IngestResult {
   graph_edges: number;
 }
 
-export function ingestDocument(file: File, category: DocumentCategory, courseOutcomes?: string) {
+export function ingestDocument(file: File, category: DocumentCategory, subjectId: string, courseOutcomes?: string) {
   const form = new FormData();
   form.append("file", file);
   form.append("category", category);
+  form.append("subject_id", subjectId);
   if (courseOutcomes) form.append("course_outcomes", courseOutcomes);
   return apiFetch<IngestResult>("/graph/ingest", { method: "POST", body: form });
 }
@@ -242,19 +266,21 @@ export interface DedupeTopicsResult {
   questions_updated: number;
 }
 
-export function dedupeTopics() {
-  return apiFetch<DedupeTopicsResult>("/graph/dedupe-topics", { method: "POST" });
+export function dedupeTopics(subjectId: string) {
+  return apiFetch<DedupeTopicsResult>(`/graph/dedupe-topics?subject_id=${encodeURIComponent(subjectId)}`, {
+    method: "POST",
+  });
 }
 
 // ---------- Questions ----------
 
 export interface GenerateQuestionsParams {
+  subject_id: string;
   topic: string;
   num_questions: number;
   bloom_level: BloomLevel;
   marks: number;
   question_type: QuestionType;
-  target_difficulty?: Difficulty;
   check_duplicates?: boolean;
   save_to_bank?: boolean;
 }
@@ -266,33 +292,44 @@ export function generateQuestions(params: GenerateQuestionsParams) {
   });
 }
 
-export function fetchQuestions() {
-  return apiFetch<Question[]>("/questions");
+export function fetchQuestions(subjectId: string) {
+  return apiFetch<Question[]>(`/questions?subject_id=${encodeURIComponent(subjectId)}`);
 }
 
-export function saveQuestion(question: Question) {
-  return apiFetch<Question>("/questions", { method: "POST", body: JSON.stringify(question) });
+export function saveQuestion(subjectId: string, question: Question) {
+  return apiFetch<Question>(`/questions?subject_id=${encodeURIComponent(subjectId)}`, {
+    method: "POST",
+    body: JSON.stringify(question),
+  });
 }
 
-export function deleteQuestion(id: string) {
-  return apiFetch<{ deleted: string }>(`/questions/${id}`, { method: "DELETE" });
+export function deleteQuestion(subjectId: string, id: string) {
+  return apiFetch<{ deleted: string }>(`/questions/${id}?subject_id=${encodeURIComponent(subjectId)}`, {
+    method: "DELETE",
+  });
 }
 
-export function checkDuplicates(question: Question, threshold = 0.75) {
+export function checkDuplicates(subjectId: string, question: Question, threshold = 0.75) {
   return apiFetch<{ matches: DuplicateMatch[] }>("/questions/check-duplicates", {
     method: "POST",
-    body: JSON.stringify({ question, threshold }),
+    body: JSON.stringify({ subject_id: subjectId, question, threshold }),
   });
 }
 
 // ---------- Exams ----------
 
-export function createExam(data: { name: string; question_ids?: string[]; total_marks?: number; duration_minutes?: number | null }) {
+export function createExam(data: {
+  subject_id: string;
+  name: string;
+  question_ids?: string[];
+  total_marks?: number;
+  duration_minutes?: number | null;
+}) {
   return apiFetch<Exam>("/exams", { method: "POST", body: JSON.stringify(data) });
 }
 
-export function listExams() {
-  return apiFetch<Exam[]>("/exams");
+export function listExams(subjectId: string) {
+  return apiFetch<Exam[]>(`/exams?subject_id=${encodeURIComponent(subjectId)}`);
 }
 
 export function getExam(id: string) {

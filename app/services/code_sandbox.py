@@ -27,6 +27,9 @@ _SAFE_BUILTINS = [
     "pow", "print", "range", "repr", "reversed", "round", "set", "sorted",
     "str", "sum", "tuple", "type", "zip", "input", "Exception", "ValueError",
     "TypeError", "IndexError", "KeyError", "StopIteration", "ZeroDivisionError",
+    "AttributeError", "RuntimeError", "NotImplementedError", "object",
+    "staticmethod", "classmethod", "property", "super", "__build_class__",
+    "__name__",
 ]
 
 

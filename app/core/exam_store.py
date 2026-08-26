@@ -44,6 +44,13 @@ class ExamStore:
             reverse=True,
         )
 
+    def list_by_subject(self, subject_id: str) -> list[Exam]:
+        return sorted(
+            (e for e in self.exams.values() if e.subject_id == subject_id),
+            key=lambda e: e.updated_at,
+            reverse=True,
+        )
+
     def get(self, exam_id: str) -> Exam | None:
         return self.exams.get(exam_id)
 

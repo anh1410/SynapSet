@@ -10,6 +10,7 @@ ExamBucket = Literal["draft", "upcoming", "live", "closed"]
 class Exam(BaseModel):
     id: str
     teacher_id: str
+    subject_id: str
     name: str
     question_ids: list[str] = Field(default_factory=list)
     total_marks: int = 0

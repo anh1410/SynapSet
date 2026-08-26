@@ -18,6 +18,7 @@ import {
   type GraphNode,
   type Question,
 } from "@/lib/api";
+import { useAuth } from "@/lib/AuthContext";
 import { cn } from "@/lib/utils";
 
 const difficultyVariant: Record<DifficultyBucket, "success" | "warning" | "destructive"> = {
@@ -33,6 +34,7 @@ export function BankPage({
   onSendToExam: (questionIds: string[]) => void;
   initialSearch?: string;
 }) {
+  const { activeSubjectId } = useAuth();
   const [questions, setQuestions] = useState<Question[]>([]);
   const [topics, setTopics] = useState<GraphNode[]>([]);
   const [loading, setLoading] = useState(true);
@@ -46,10 +48,14 @@ export function BankPage({
   }, [initialSearch]);
 
   useEffect(() => {
-    Promise.all([fetchQuestions().then(setQuestions), fetchGraph().then((g) => setTopics(g.nodes))]).finally(() =>
-      setLoading(false)
-    );
-  }, []);
+    if (!activeSubjectId) return;
+    setLoading(true);
+    setSelected([]);
+    Promise.all([
+      fetchQuestions(activeSubjectId).then(setQuestions),
+      fetchGraph(activeSubjectId).then((g) => setTopics(g.nodes)),
+    ]).finally(() => setLoading(false));
+  }, [activeSubjectId]);
 
   const topicName = useMemo(() => {
     const map = new Map(topics.map((t) => [t.id, t.name]));
@@ -67,13 +73,15 @@ export function BankPage({
     setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
   const handleDelete = async (id: string) => {
-    await deleteQuestion(id);
+    if (!activeSubjectId) return;
+    await deleteQuestion(activeSubjectId, id);
     setQuestions((qs) => qs.filter((q) => q.id !== id));
     setSelected((s) => s.filter((x) => x !== id));
   };
 
   const handleBulkDelete = async () => {
-    await Promise.all(selected.map((id) => deleteQuestion(id)));
+    if (!activeSubjectId) return;
+    await Promise.all(selected.map((id) => deleteQuestion(activeSubjectId, id)));
     setQuestions((qs) => qs.filter((q) => !selected.includes(q.id)));
     setSelected([]);
   };

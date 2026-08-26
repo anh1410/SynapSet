@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { Menu, Search, Bell, Network, HelpCircle, LogOut } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
+import { SubjectSwitcher } from "@/components/SubjectSwitcher";
 import { fetchGraph, fetchQuestions, type GraphNode, type Question } from "@/lib/api";
 import { useAuth } from "@/lib/AuthContext";
 import type { Page } from "@/App";
@@ -14,6 +15,7 @@ const titles: Record<Page, { title: string; subtitle: string }> = {
   exam: { title: "Exam Builder", subtitle: "Add questions one at a time and schedule your quiz" },
   exams: { title: "Exams", subtitle: "Every quiz you've built — upcoming, live, and closed" },
   results: { title: "Results", subtitle: "Auto-graded scores as students submit" },
+  answerKey: { title: "Answer Key", subtitle: "Every question and its correct answer" },
 };
 
 function initialsFor(name: string): string {
@@ -35,7 +37,7 @@ export function Topbar({
   onSelectQuestion: (searchText: string) => void;
 }) {
   const { title, subtitle } = titles[page];
-  const { teacher, logout } = useAuth();
+  const { teacher, logout, activeSubjectId } = useAuth();
 
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -45,8 +47,8 @@ export function Topbar({
   const blurTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const ensureLoaded = () => {
-    if (loaded) return;
-    Promise.all([fetchGraph(), fetchQuestions()]).then(([g, qs]) => {
+    if (loaded || !activeSubjectId) return;
+    Promise.all([fetchGraph(activeSubjectId), fetchQuestions(activeSubjectId)]).then(([g, qs]) => {
       setTopics(g.nodes);
       setQuestions(qs);
       setLoaded(true);
@@ -154,6 +156,8 @@ export function Topbar({
           </div>
         )}
       </div>
+
+      <SubjectSwitcher />
 
       <button className="relative rounded-md p-1.5 text-muted-foreground transition-colors duration-200 hover:bg-secondary hover:text-foreground">
         <Bell className="h-4.5 w-4.5" />

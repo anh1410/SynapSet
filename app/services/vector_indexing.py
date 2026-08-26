@@ -7,12 +7,12 @@ def _chunk_id(chunk: TextChunk) -> str:
     return f"{chunk.source_document}::{chunk.chunk_index}"
 
 
-def index_chunks(chunks: list[TextChunk]) -> None:
-    """Embed each chunk and upsert it into the vector store."""
+def index_chunks(chunks: list[TextChunk], subject_id: str) -> None:
+    """Embed each chunk and upsert it into the given subject's vector store."""
     if not chunks:
         return
 
-    collection = get_collection()
+    collection = get_collection(subject_id)
     ids = [_chunk_id(c) for c in chunks]
     embeddings = [embed_text(c.text) for c in chunks]
     documents = [c.text for c in chunks]
@@ -23,15 +23,16 @@ def index_chunks(chunks: list[TextChunk]) -> None:
     collection.upsert(ids=ids, embeddings=embeddings, documents=documents, metadatas=metadatas)
 
 
-def delete_document_chunks(filename: str) -> None:
+def delete_document_chunks(subject_id: str, filename: str) -> None:
     """Remove every retrieval chunk indexed from a document, so deleting it
     also stops it from showing up as grounding context for future generation."""
-    get_collection().delete(where={"source_document": filename})
+    get_collection(subject_id).delete(where={"source_document": filename})
 
 
-def query_similar_chunks(query: str, n_results: int = 5) -> list[dict]:
-    """Return the top-n chunks (text + metadata + distance) most similar to the query."""
-    collection = get_collection()
+def query_similar_chunks(query: str, subject_id: str, n_results: int = 5) -> list[dict]:
+    """Return the top-n chunks (text + metadata + distance) most similar to the query,
+    scoped to one subject's indexed material."""
+    collection = get_collection(subject_id)
     query_embedding = embed_text(query)
 
     results = collection.query(query_embeddings=[query_embedding], n_results=n_results)

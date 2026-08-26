@@ -7,6 +7,7 @@ export interface TeacherPublic {
 
 const TOKEN_KEY = "synapset_token";
 const TEACHER_KEY = "synapset_teacher";
+const SUBJECT_KEY = "synapset_active_subject";
 
 export function getToken(): string | null {
   return sessionStorage.getItem(TOKEN_KEY);
@@ -30,4 +31,14 @@ export function setSession(token: string, teacher: TeacherPublic) {
 export function clearSession() {
   sessionStorage.removeItem(TOKEN_KEY);
   sessionStorage.removeItem(TEACHER_KEY);
+  sessionStorage.removeItem(SUBJECT_KEY);
+}
+
+export function getActiveSubjectId(): string | null {
+  return sessionStorage.getItem(SUBJECT_KEY);
+}
+
+export function setActiveSubjectId(id: string | null) {
+  if (id) sessionStorage.setItem(SUBJECT_KEY, id);
+  else sessionStorage.removeItem(SUBJECT_KEY);
 }

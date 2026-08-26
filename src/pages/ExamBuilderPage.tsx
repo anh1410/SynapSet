@@ -10,6 +10,7 @@ import {
   RefreshCw,
   Lock,
   CalendarClock,
+  KeyRound,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -19,22 +20,20 @@ import { Badge } from "@/components/ui/badge";
 import {
   BLOOM_LEVELS,
   BLOOM_LABELS,
-  DIFFICULTY_LEVELS,
   QUESTION_TYPE_LABELS,
   QUESTION_TYPE_ORDER,
   createExam,
-  difficultyBucket,
   fetchGraph,
   fetchQuestions,
   generateQuestions,
   getExam,
   updateExam,
   type BloomLevel,
-  type Difficulty,
   type GraphNode,
   type Question,
   type QuestionType,
 } from "@/lib/api";
+import { useAuth } from "@/lib/AuthContext";
 import { cn } from "@/lib/utils";
 
 interface BuilderRow {
@@ -44,7 +43,6 @@ interface BuilderRow {
   questionType: QuestionType;
   bloomLevel: BloomLevel;
   marks: number;
-  difficulty: Difficulty;
   question?: Question;
   error?: string;
 }
@@ -60,7 +58,6 @@ function makeRow(topics: GraphNode[]): BuilderRow {
     questionType: "short_answer",
     bloomLevel: 2,
     marks: 5,
-    difficulty: "Medium",
   };
 }
 
@@ -73,6 +70,7 @@ export function ExamBuilderPage({
   editExamId: string | null;
   onSaved: (examId: string) => void;
 }) {
+  const { activeSubjectId } = useAuth();
   const [topics, setTopics] = useState<GraphNode[]>([]);
   const [examId, setExamId] = useState<string | null>(editExamId);
   const [examName, setExamName] = useState(`Weekly Quiz — ${new Date().toLocaleDateString()}`);
@@ -83,13 +81,15 @@ export function ExamBuilderPage({
   const [generatingAll, setGeneratingAll] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [showAnswerKey, setShowAnswerKey] = useState(false);
 
   useEffect(() => {
-    fetchGraph().then((g) => setTopics(g.nodes));
-  }, []);
+    if (!activeSubjectId) return;
+    fetchGraph(activeSubjectId).then((g) => setTopics(g.nodes));
+  }, [activeSubjectId]);
 
   useEffect(() => {
-    if (loaded) return;
+    if (loaded || !activeSubjectId) return;
 
     if (editExamId) {
       getExam(editExamId).then(({ exam, questions }) => {
@@ -106,7 +106,6 @@ export function ExamBuilderPage({
             questionType: q.question_type,
             bloomLevel: q.bloom_level,
             marks: q.marks,
-            difficulty: difficultyBucket(q.difficulty_score),
             question: q,
           }))
         );
@@ -116,7 +115,7 @@ export function ExamBuilderPage({
     }
 
     if (seedQuestionIds.length > 0) {
-      fetchQuestions().then((all) => {
+      fetchQuestions(activeSubjectId).then((all) => {
         const byId = new Map(all.map((q) => [q.id, q]));
         setRows(
           seedQuestionIds
@@ -129,7 +128,6 @@ export function ExamBuilderPage({
               questionType: q.question_type,
               bloomLevel: q.bloom_level,
               marks: q.marks,
-              difficulty: difficultyBucket(q.difficulty_score),
               question: q,
             }))
         );
@@ -140,7 +138,7 @@ export function ExamBuilderPage({
 
     setLoaded(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editExamId, seedQuestionIds, loaded]);
+  }, [editExamId, seedQuestionIds, loaded, activeSubjectId]);
 
   useEffect(() => {
     if (loaded && !editExamId && seedQuestionIds.length === 0 && rows.length === 0 && topics.length > 0) {
@@ -158,16 +156,16 @@ export function ExamBuilderPage({
 
   const generateRow = async (rowId: string) => {
     const row = rows.find((r) => r.rowId === rowId);
-    if (!row || !row.topicId) return;
+    if (!row || !row.topicId || !activeSubjectId) return;
     updateRow(rowId, "status", "generating");
     try {
       const { results } = await generateQuestions({
+        subject_id: activeSubjectId,
         topic: topicName(row.topicId),
         num_questions: 1,
         bloom_level: row.bloomLevel,
         marks: row.marks,
         question_type: row.questionType,
-        target_difficulty: row.difficulty,
         check_duplicates: true,
         save_to_bank: true,
       });
@@ -198,7 +196,7 @@ export function ExamBuilderPage({
   const anyPending = rows.some((r) => r.status === "pending");
 
   const handleSave = async () => {
-    if (generatedRows.length === 0) return;
+    if (generatedRows.length === 0 || !activeSubjectId) return;
     setSaving(true);
     try {
       const question_ids = generatedRows.map((r) => r.question!.id);
@@ -218,6 +216,7 @@ export function ExamBuilderPage({
         });
       } else {
         const exam = await createExam({
+          subject_id: activeSubjectId,
           name: examName,
           question_ids,
           total_marks: totalMarks,
@@ -242,7 +241,7 @@ export function ExamBuilderPage({
             <FileStack className="h-4 w-4 text-primary" />
             <CardTitle>Exam Builder</CardTitle>
           </div>
-          <CardDescription>Add questions one at a time — pick topic, type, Bloom's level, marks, and difficulty for each</CardDescription>
+          <CardDescription>Add questions one at a time — pick topic, type, Bloom's level, and marks for each</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-1.5">
@@ -333,25 +332,13 @@ export function ExamBuilderPage({
                         ))}
                       </Select>
                     </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <Select
-                        value={row.difficulty}
-                        onChange={(e) => updateRow(row.rowId, "difficulty", e.target.value as Difficulty)}
-                      >
-                        {DIFFICULTY_LEVELS.map((d) => (
-                          <option key={d} value={d}>
-                            {d}
-                          </option>
-                        ))}
-                      </Select>
-                      <Input
-                        type="number"
-                        min={1}
-                        value={row.marks}
-                        onChange={(e) => updateRow(row.rowId, "marks", Math.max(1, Number(e.target.value)))}
-                        placeholder="Marks"
-                      />
-                    </div>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={row.marks}
+                      onChange={(e) => updateRow(row.rowId, "marks", Math.max(1, Number(e.target.value)))}
+                      placeholder="Marks"
+                    />
                     {row.status === "error" && (
                       <p className="flex items-center gap-1.5 text-[11px] text-destructive">
                         <AlertTriangle className="h-3 w-3" /> {row.error}
@@ -411,22 +398,26 @@ export function ExamBuilderPage({
         ) : (
           <>
             <Card className={cn(anyError ? "border-warning/30 bg-warning/[0.03]" : "border-success/30 bg-success/[0.03]")}>
-              <CardContent className="p-4">
-                <p className="text-sm font-medium text-foreground">
-                  {generatedRows.length} question{generatedRows.length !== 1 && "s"} ready · {totalMarks} marks · {duration} min
-                </p>
-                {goLiveAt && (
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Scheduled to go live {new Date(goLiveAt).toLocaleString()}
-                    {password && " · password protected"}
+              <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
+                <div>
+                  <p className="text-sm font-medium text-foreground">
+                    {generatedRows.length} question{generatedRows.length !== 1 && "s"} ready · {totalMarks} marks · {duration} min
                   </p>
-                )}
+                  {goLiveAt && (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Scheduled to go live {new Date(goLiveAt).toLocaleString()}
+                      {password && " · password protected"}
+                    </p>
+                  )}
+                </div>
+                <Button variant="outline" size="sm" onClick={() => setShowAnswerKey((v) => !v)}>
+                  <KeyRound className="h-3.5 w-3.5" /> {showAnswerKey ? "Hide Answer Key" : "Show Answer Key"}
+                </Button>
               </CardContent>
             </Card>
 
             {generatedRows.map((row, idx) => {
               const q = row.question!;
-              const bucket = difficultyBucket(q.difficulty_score);
               return (
                 <Card key={row.rowId}>
                   <CardContent className="space-y-2 p-4">
@@ -443,20 +434,34 @@ export function ExamBuilderPage({
                     {(q.question_type === "mcq" || q.question_type === "fill_in_blank") && q.options && (
                       <ul className="space-y-0.5 text-xs text-muted-foreground">
                         {q.options.map((opt, oi) => (
-                          <li key={oi} className={cn(opt === q.correct_answer && "font-medium text-success")}>
+                          <li
+                            key={oi}
+                            className={cn(showAnswerKey && opt === q.correct_answer && "font-medium text-success")}
+                          >
                             {String.fromCharCode(97 + oi)}) {opt}
                           </li>
                         ))}
                       </ul>
+                    )}
+                    {showAnswerKey && q.correct_answer && (
+                      <div className="rounded-md border border-success/30 bg-success/[0.04] p-2.5">
+                        <p className="text-[11px] font-semibold text-success">
+                          {q.question_type === "code_fix" ? "Reference Solution" : "Answer"}
+                        </p>
+                        {q.question_type === "code_fix" ? (
+                          <pre className="mt-1 overflow-x-auto rounded-md bg-slate-900 p-3 text-xs text-slate-100">
+                            <code>{q.correct_answer}</code>
+                          </pre>
+                        ) : (
+                          <p className="mt-0.5 whitespace-pre-wrap text-xs text-foreground">{q.correct_answer}</p>
+                        )}
+                      </div>
                     )}
                     <div className="flex flex-wrap gap-1.5">
                       <Badge variant="outline">{QUESTION_TYPE_LABELS[q.question_type]}</Badge>
                       <Badge variant="outline">{topicName(row.topicId)}</Badge>
                       <Badge variant="outline">{q.marks} marks</Badge>
                       <Badge variant="accent">{BLOOM_LABELS[q.bloom_level]}</Badge>
-                      <Badge variant={bucket === "Hard" ? "destructive" : bucket === "Medium" ? "warning" : "success"}>
-                        {bucket}
-                      </Badge>
                     </div>
                   </CardContent>
                 </Card>
