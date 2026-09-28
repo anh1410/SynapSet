@@ -1,12 +1,12 @@
 # SynapSet — Development Context (handoff)
 
-_Last updated: 2026-09-28 · Branch: `stavina-teacher-features` · Head: `76be0e5`_
+_Last updated: 2026-09-28 · Branch: `stavina-student-features` (on top of `stavina-teacher-features` @ `2ea19b7`)_
 
-SynapSet is a teacher-facing assessment platform: teachers upload course material, a
+SynapSet is an assessment platform: teachers upload course material, a
 knowledge graph + vector index is built from it, questions are generated with Graph-RAG
 (Gemini), papers are assembled against MSE/SEE patterns with a constraint solver, exams are
-scheduled and taken by students (separate Student app, **not yet built** in this repo), graded
-(auto + manual), and analysed.
+scheduled and taken by students (public Student interface at `/take/<examId>` in the same
+Vite app, see §9), graded (auto + manual), and analysed.
 
 This file is the single source of context for continuing development. Read it fully before changing code.
 
@@ -17,12 +17,14 @@ This file is the single source of context for continuing development. Read it fu
 | Area | Status |
 |---|---|
 | Teacher interface | Feature-complete for this phase (see §7) |
-| Student interface | **Not built.** Backend API + a client autosave hook are ready (see §9) |
-| Backend tests | 184 passed, 2 skipped, 2 deselected (Gemini-backed, opt-in) |
+| Student interface | **Complete for this phase** (see §9): lobby, timed attempts, autosave/resume, submit, receipt |
+| Backend tests | 190 passed, 2 skipped, 2 deselected (Gemini-backed, opt-in) |
 | Frontend | `tsc -b --noEmit` clean, `vite build` succeeds |
-| Git | `stavina-teacher-features` is 3 commits ahead of `main` (`9c95791`); **never pushed**, no upstream |
+| Git | `main` (`9c95791`) → `stavina-teacher-features` (`2ea19b7`, pushed) → `stavina-student-features` (student milestone, pushed). Nothing merged into `main`. |
 
 Branch commits (newest first):
+- _(stavina-student-features)_ Add student exam interface and attempt workflow
+- `2ea19b7` Add SynapSet developer handoff document
 - `76be0e5` Paper review/editing, blueprint & CO analysis, bank intelligence, Graph-RAG evidence, assessment analytics, topic risk, PDF export, attempt autosave
 - `0cee599` Exam closing times, server-side attempts & duration enforcement, timing API
 - `eb627e2` Exam patterns (MSE/SEE), pattern-based assembly, manual grading, student performance analytics
@@ -42,7 +44,7 @@ Prereqs already on the dev machine: Python **3.12** (`py -3.12`), Node, **Micros
 # Terminal 2 — frontend (port 5173, proxies /api -> 8000)
 npm run dev
 ```
-Open http://localhost:5173.
+Open http://localhost:5173 (teacher app). Students open `http://localhost:5173/take/<examId>` (teachers get it from Exams → "Copy student link").
 
 **Do not use `--reload`**: on this Windows setup WatchFiles hangs after the first change. Restart the backend manually after backend edits. Frontend hot-reloads.
 
@@ -88,7 +90,7 @@ Local models  sentence-transformers all-MiniLM-L6-v2 (duplicates), XGBoost+SHAP 
 ```
 - Every store is `@lru_cache`'d, loaded into memory, rewritten whole on save → **single process only**; don't hand-edit `data/` while the backend runs (it will overwrite you). Stop the backend first.
 - Multi-tenancy: JWT teacher auth (`app/api/deps.py: get_current_teacher`), `require_subject(subject_id, teacher)` returns 404 for subjects the teacher doesn't own. Every teacher endpoint is subject/owner-scoped; tests cover cross-teacher isolation.
-- Student endpoints (`app/api/submissions.py`) are public, gated by the exam password + attempt id.
+- Student endpoints (`app/api/submissions.py`) are public, gated by the exam password + attempt id. The frontend calls them through a separate `studentFetch` (no teacher token, 401 ≠ logout) — see §9.
 - Time: always `app.core.clock.utcnow()` (called as `clock.utcnow()` so tests can monkeypatch it).
 - Neo4j config exists but is unused (NetworkX only).
 
@@ -105,7 +107,8 @@ Local models  sentence-transformers all-MiniLM-L6-v2 (duplicates), XGBoost+SHAP 
 | `api/exams.py` | exam CRUD (schedule, closes_at, pattern link), submissions list, manual grading, attempts list; blocks question changes once submissions exist |
 | `api/paper_review.py` | blueprint, replacement candidates, regenerate, marks edit, PDF export |
 | `api/patterns.py` | pattern CRUD, presets, document import, assemble (+gap fill, avoid-recent), compliance check |
-| `api/submissions.py` | **student-facing**: timing, verify-password, start/resume, attempt status, autosave, submit |
+| `api/submissions.py` | **student-facing**: timing, verify-password, start/resume, attempt status, autosave, submit (returns a trimmed `SubmissionReceipt`) |
+| `schemas/public_exam.py` | student-safe views: `PublicQuestion`, `PublicExam`, `ExamTiming`, `AttemptResponse`, `SaveAnswersResult`, `SubmissionReceipt` |
 | `api/analytics.py` | class overview, student detail, per-exam analytics, topic risk, grading scale |
 | `core/config.py` | `Settings` (pydantic-settings, `.env`) incl. thresholds (§6.8) |
 | `core/*_store.py` | JSON/pickle stores; `graph_store.course_outcome_node_ids()` |
@@ -126,11 +129,11 @@ Local models  sentence-transformers all-MiniLM-L6-v2 (duplicates), XGBoost+SHAP 
 | `services/pdf_writer.py`, `paper_export.py` | dependency-free PDF writer; paper/answer key/blueprint layouts |
 
 ### Frontend `src/`
-- `App.tsx` — state-based "router" (`Page` union), auth gate → first-subject gate → shell.
-- `lib/api.ts` — **all** types + API calls (mirror backend schemas). `lib/AuthContext.tsx`, `lib/session.ts` (sessionStorage token + active subject).
+- `App.tsx` — if the path is `/take/<examId>` renders `StudentApp` (no auth); otherwise the teacher app: state-based "router" (`Page` union), auth gate → first-subject gate → shell.
+- `lib/api.ts` — **all** types + API calls (mirror backend schemas). Teacher calls use `apiFetch` (Bearer token, 401 → session expired); student calls use `studentFetch`. `ApiError` carries `status`. `lib/AuthContext.tsx`, `lib/session.ts` (sessionStorage token + active subject).
+- Student interface: `pages/student/*`, `lib/studentSession.ts`, `lib/useServerCountdown.ts`, `lib/useAttemptAutosave.ts`, `components/AutosaveStatus.tsx` (see §9).
 - Pages: `OverviewPage`, `UploadPage`, `AnalysisPage`, `BankPage`, `PatternsPage`, `ExamBuilderPage`, `ExamsPage`, `PaperReviewPage`, `ExamResultsPage`, `AnswerKeyPage`, `PerformancePage`, `AuthPage`.
 - Components: `Sidebar`, `Topbar`, `SubjectSwitcher`, `PatternEditor`, `PatternCompliancePanel`, `BlueprintView`, `EvidenceDialog`, `charts.tsx` (hand-rolled SVG/CSS charts, table-view toggle), `AutosaveStatus`; `ui/` primitives (incl. minimal `dialog.tsx`).
-- `lib/useAttemptAutosave.ts` + `components/AutosaveStatus.tsx` — **for the future Student UI; not used by any page**.
 - `lib/mock-data.ts` is dead code.
 
 ---
@@ -157,7 +160,7 @@ analytics  GET /analytics/overview?subject_id[&exam_type] · GET /analytics/stud
            GET /analytics/exams/{exam_id} · GET /analytics/topic-risk?subject_id · GET /analytics/grading-scale
 student    (public) GET /exams/{id}/timing · POST /exams/{id}/verify-password · POST /exams/{id}/start
            GET /exams/{id}/attempts/{attempt_id} · PUT /exams/{id}/attempts/{attempt_id}/answers
-           POST /exams/{id}/submit
+           POST /exams/{id}/submit  (-> SubmissionReceipt, see §9.6)
 GET /health
 ```
 Review endpoints take the **draft** paper: `{question_ids?, marks_overrides?: {qid: marks}, target_id?}`.
@@ -218,14 +221,60 @@ Overview · Upload Materials · Topic Analysis · Question Bank (usage history +
 
 ---
 
-## 9. Next milestone: Student interface
-Not started. Build it against the existing public API (§5 "student") — no backend changes should be required for the basic flow:
-1. `GET /exams/{id}/timing` → upcoming/live/closed, opens/closes in, duration (show server-time-corrected countdowns).
-2. `POST /exams/{id}/start {password, student_name, student_identifier}` → attempt (id, deadline, remaining_seconds), questions (no answer keys), `saved_answers`, `save_seq`.
-3. Autosave with `useAttemptAutosave({examId, attemptId, initialSeq: save_seq})` → `update(qid, answer)`; show `<AutosaveStatus/>`.
-4. On refresh: call `/start` again (same identity) or `GET /attempts/{attempt_id}` to restore.
-5. `POST /submit {attempt_id, answers}`; handle 403 (time up / auto-submitted) and 409 (already submitted).
-The Student app may live in a separate project (CORS allows any localhost port in development). Decide whether it shares this repo.
+## 9. Student interface (completed milestone)
+Branch `stavina-student-features` (branched from `stavina-teacher-features`). Students have **no accounts**: identity = name + optional roll number (normalised into `student_key`, §6.5); access = the link + the exam password.
+
+### 9.1 Frontend architecture
+- Same Vite app, no router library. `App.tsx` checks `window.location.pathname` for `/take/<examId>` **before** the teacher `AuthProvider`, and renders `StudentApp` — the student UI never touches teacher auth state.
+- Student API calls live in `lib/api.ts` ("Student API" section) and go through `studentFetch`: never sends the teacher's Bearer token and treats 401 ("Incorrect password") as an ordinary `ApiError` (the teacher `apiFetch` clears the session on 401 — using it for student calls would log out a teacher in the same browser).
+- `ApiError.status` is used to map server refusals to screens (`studentFlow.ts: endedFromError`).
+- Styling reuses the teacher `ui/` primitives (Card, Button, Input, Badge, Dialog, Progress); mobile-first (single column, sticky header; navigator above questions on small screens, sticky sidebar on `lg`).
+
+### 9.2 Pages / components (`src/pages/student/`)
+| File | Role |
+|---|---|
+| `StudentApp.tsx` | Screen state machine (`StudentView`): loading → lobby / exam / receipt / ended / not_found / error. Lobby (upcoming countdown that auto-refreshes into live; closed; start form: name, roll number, password). Resume on mount. Ended screens. |
+| `StudentExam.tsx` | Exam taking: sticky header (exam, student, `AutosaveStatus`, timer turning amber ≤5 min / red ≤1 min, Submit), question list, navigator (answered count + progress + jump buttons), submit confirmation dialog listing unanswered questions, time-up auto-submit, periodic resync, `beforeunload` warning while saves are pending. |
+| `QuestionCard.tsx` | One control per type: mcq → radios; fill_in_blank → radios if it has options, else text; numerical → text input (`inputMode=decimal`, not `type=number`, so the exact string is kept); short/long → textarea; code_fix → monospace textarea pre-filled with `starter_code`, Tab inserts 4 spaces, "Reset to starter code". `isAnswered`: non-blank and (code) differs from starter code. |
+| `SubmissionReceiptView.tsx` | Receipt (§9.6). |
+| `studentFlow.ts` | `StudentView` union, `endedFromError`, `viewForAttempt`. |
+| `lib/studentSession.ts` | sessionStorage: `synapset_student_attempt:<examId>` = {attemptId, identity incl. password}; `synapset_student_receipt:<examId>`. Separate from teacher keys. |
+| `lib/useServerCountdown.ts` | Countdown from a server-computed `*_seconds` value, anchored to `performance.now()`; `formatClock`. |
+| `lib/useAttemptAutosave.ts`, `components/AutosaveStatus.tsx` | Autosave (pre-existing, now used). |
+| Teacher `ExamsPage.tsx` | "Copy student link" on live/upcoming exams → `${origin}/take/<examId>`; falls back to `window.prompt` if the clipboard API is blocked. |
+
+### 9.3 Student API flow
+1. Lobby: `GET /exams/{id}/timing` (404 → "Exam not found"; drafts are 404 too).
+2. Start: `POST /exams/{id}/start {password, student_name, student_identifier}` → `AttemptResponse` (timing, attempt {id, deadline, remaining_seconds, expired, submitted}, exam with `PublicQuestion`s, `saved_answers`, `save_seq`). 401 → "Incorrect exam password". Identity + attempt id stored in sessionStorage.
+3. Autosave: `PUT /exams/{id}/attempts/{aid}/answers {answers, seq}` via `useAttemptAutosave`.
+4. Resync (every 60 s, on tab visible, on `online`): `GET /exams/{id}/attempts/{aid}` — updates the timer; detects submitted/expired/closed.
+5. Submit: `POST /exams/{id}/submit {password, student_name, student_identifier, attempt_id, answers}` — sends **all** current answers (server overlays them on the autosaved ones). The password is re-checked by the server, which is why it's kept in sessionStorage during the attempt.
+
+### 9.4 Attempt lifecycle & server-side timing
+- One attempt per student per exam; `started_at` = server clock; deadline = min(start + duration frozen at start, `closes_at`) (§6.5). The client never sends times.
+- The UI countdown uses `remaining_seconds` from the latest server response anchored to the monotonic clock, so a wrong/changed device clock can't move it; resync corrects drift.
+- At 0: the client submits once (`timeRanOut`) — within the server's 30 s grace. If that fails (offline), lazy finalisation later submits the autosaved answers; the page learns via resync.
+- Teacher closes the exam → next resync sees the attempt submitted (finalised from saved answers) → "Your answers were submitted" screen. With nothing saved → "This exam is closed".
+- Screens for server refusals: 409 already submitted → "Exam submitted"; 403 auto-submitted → "Your answers were submitted"; 403 time up → "Time is up"; 403 closed → "This exam is closed"; 403 not live yet → back to lobby.
+
+### 9.5 Autosave / resume
+- Every edit → local state + `autosave.update(qid, value)`; debounced batch PUTs with increasing `seq` (stale retries ignored server-side); offline → backoff retry, "Connection lost" status; 403/409 → autosave stops ("ended").
+- Refresh: `StudentApp` reads the stored attempt and calls `/start` again with the same identity → same attempt, same deadline, `saved_answers` restored, autosave seeded with `save_seq`. On another device/tab the student re-enters the same name + roll number (same result).
+- On any end (receipt/ended/not found) the stored attempt — including the password — is cleared; only the receipt is kept so a refresh still shows it.
+
+### 9.6 Submission receipt
+`POST /submit` returns `SubmissionReceipt` (not the graded `Submission`):
+`submission_id, exam_id, student_name, student_identifier, attempt_id, auto_submitted, started_at, submitted_at, auto_graded_marks, auto_graded_max_marks, pending_review_marks, pending_review_count, total_max_marks, answers[{question_id, status: auto_graded|pending_review}]`.
+UI: "Score so far **X / Y** + N marks pending teacher review", paper total, per-question "Auto-graded" / "Pending teacher review" badges. Pending marks are never shown as zero. No per-question marks or correctness. The teacher results API (`GET /exams/{id}/submissions`) is unchanged and still returns the full graded submission.
+
+### 9.7 Student security / data-exposure rules
+- Questions during an attempt (`PublicQuestion`): no `correct_answer`, `test_cases`, `difficulty_score`, `topic_ids`, `co_ids`, `provenance`, `skill_category`; exam password never returned. (`bloom_level` is still included — not displayed.)
+- Receipt: no correctness, grading `detail`, per-answer marks, test-case counts, answer text, feedback or question metadata. Tests: `tests/test_submission_receipt.py` (forbidden-key scan over the whole JSON, incl. `/start` and attempt status).
+- Student calls never carry the teacher token; a student 401 can't end a teacher session.
+- Attempt ids are unguessable UUIDs and act as the attempt token.
+
+### 9.8 Verification done for this milestone
+Backend suite (numbers in §1), `tsc`, `vite build`, and browser E2E against an **isolated** backend (port 8001, all store paths pointed at a scratch dir via the env vars in §8, so `data/` is never touched): upcoming → live transition, closed & unknown exam, wrong password (teacher session preserved), all six question types, autosave, refresh/resume (answers + timer), submit confirmation + receipt, 409 on re-entry, time-up auto-submit, teacher close mid-attempt, teacher Exams/Results pages, Copy student link, 375 px layout.
 
 ---
 
@@ -243,10 +292,22 @@ The Student app may live in a separate project (CORS allows any localhost port i
 - Existing Overview/Topic Analysis "coverage" is relative to the best-covered topic (pre-existing semantics).
 - `mock-data.ts` dead; `.env.example` stale; stray empty tracked file `git` at repo root (from `main`).
 
+Student interface:
+- No student accounts: identity is name + roll number; anyone with the link + password can start as any name (one attempt per identity).
+- The exam password sits in the tab's sessionStorage during an attempt (the server re-checks it on submit); cleared when the exam ends. The receipt stays in sessionStorage for the tab's lifetime (a second student using the same tab would see it).
+- `GET /timing` doesn't return the exam name, so the lobby can't show it until the attempt starts.
+- `PublicQuestion` still includes `bloom_level`.
+- No page for students to see results later (only the receipt at submit time); results are shared by the teacher.
+- Grading is exact-match for numerical/fill-in-the-blank ("4.0" ≠ "4") — backend rule, not a UI one.
+- Code editor is a plain textarea (no syntax highlighting); Tab is captured for indentation (Shift+Tab still leaves the field).
+- Time-up submit relies on the tab being open; otherwise lazy finalisation submits autosaved answers when the exam is next read.
+- No frontend unit tests; student UI verified by manual browser E2E (§9.8).
+
 ---
 
 ## 11. Working rules for this repo
-- Work on `stavina-teacher-features`. **Never** checkout/modify/merge `main`; **never push** unless the user explicitly asks.
+- Student work lives on `stavina-student-features` (teacher milestone on `stavina-teacher-features`). **Never** checkout/modify/merge `main`; **never push** unless the user explicitly asks.
+- For browser E2E, run a separate backend with the store env vars (§8) pointed at a scratch directory rather than using `data/`.
 - Never modify `.env` or print the Gemini key. Never commit `data/`, `.venv/`, `node_modules/`, `dist/`, `.env` (all gitignored — keep it that way).
 - Remove any test data created during manual/E2E testing before committing; leave the real teacher accounts untouched (local `data/` holds real teacher accounts alongside any throwaway test account; delete only what your test run created).
 - Stage files explicitly (not `git add -A`); commit message ends with the Co-Authored-By line the session provides.

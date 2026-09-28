@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from app.schemas.bloom import BloomLevel
 from app.schemas.question import Question, QuestionType
+from app.schemas.submission import Submission
 
 
 class PublicQuestion(BaseModel):
@@ -87,6 +88,60 @@ class SaveAnswersResult(BaseModel):
     saved_count: int
     remaining_seconds: int | None
     deadline: datetime | None
+
+
+class ReceiptAnswer(BaseModel):
+    """Per-question status only: whether it was auto-graded or awaits the
+    teacher. No marks, correctness, grading detail or answer key."""
+
+    question_id: str
+    status: Literal["auto_graded", "pending_review"]
+
+
+class SubmissionReceipt(BaseModel):
+    """What a student gets back from submitting: their auto-graded score and
+    the marks still awaiting manual review (never counted as zero). The full
+    graded Submission - per-question correctness, grading detail, question
+    metadata snapshots - stays on the teacher's results API."""
+
+    submission_id: str
+    exam_id: str
+    student_name: str
+    student_identifier: str | None = None
+    attempt_id: str | None = None
+    auto_submitted: bool = False
+    started_at: datetime | None = None
+    submitted_at: datetime
+    auto_graded_marks: int  # marks awarded on the auto-graded questions
+    auto_graded_max_marks: int
+    pending_review_marks: int  # max marks of answers awaiting the teacher
+    pending_review_count: int
+    total_max_marks: int
+    answers: list[ReceiptAnswer]
+
+    @classmethod
+    def from_submission(cls, s: Submission) -> "SubmissionReceipt":
+        graded = [a for a in s.answers if a.is_graded]
+        pending = [a for a in s.answers if not a.is_graded]
+        return cls(
+            submission_id=s.id,
+            exam_id=s.exam_id,
+            student_name=s.student_name,
+            student_identifier=s.student_identifier,
+            attempt_id=s.attempt_id,
+            auto_submitted=s.auto_submitted,
+            started_at=s.started_at,
+            submitted_at=s.submitted_at,
+            auto_graded_marks=sum(a.marks_awarded for a in graded),
+            auto_graded_max_marks=sum(a.max_marks for a in graded),
+            pending_review_marks=sum(a.max_marks for a in pending),
+            pending_review_count=len(pending),
+            total_max_marks=s.total_max_marks,
+            answers=[
+                ReceiptAnswer(question_id=a.question_id, status="auto_graded" if a.is_graded else "pending_review")
+                for a in s.answers
+            ],
+        )
 
 
 PublicExam.model_rebuild()

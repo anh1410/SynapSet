@@ -207,7 +207,36 @@ export const ASSESSMENT_TYPE_LABELS: Record<AssessmentType, string> = {
 
 // ---------- fetch helpers ----------
 
-export class ApiError extends Error {}
+export class ApiError extends Error {
+  status?: number;
+  constructor(message: string, status?: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
+/** Turns a failed response into an ApiError carrying FastAPI's `detail` text. */
+async function responseError(res: Response): Promise<ApiError> {
+  const text = await res.text();
+  let message = text;
+  try {
+    const parsed = JSON.parse(text);
+    if (typeof parsed.detail === "string") {
+      message = parsed.detail;
+    } else if (Array.isArray(parsed.detail)) {
+      // FastAPI/pydantic validation errors: keep just the human-readable messages.
+      message = parsed.detail
+        .map((d: { msg?: string }) => (d.msg ?? "").replace(/^Value error, /, ""))
+        .filter(Boolean)
+        .join("; ");
+    } else {
+      message = JSON.stringify(parsed.detail ?? parsed);
+    }
+  } catch {
+    // not json, use raw text
+  }
+  return new ApiError(message || `${res.status} ${res.statusText}`, res.status);
+}
 
 function authHeaders(): Record<string, string> {
   const token = getToken();
@@ -229,28 +258,20 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
     window.dispatchEvent(new Event("synapset:session-expired"));
     throw new AuthError("Session expired, please log in again");
   }
-  if (!res.ok) {
-    const text = await res.text();
-    let message = text;
-    try {
-      const parsed = JSON.parse(text);
-      if (typeof parsed.detail === "string") {
-        message = parsed.detail;
-      } else if (Array.isArray(parsed.detail)) {
-        // FastAPI/pydantic validation errors: keep just the human-readable messages.
-        message = parsed.detail
-          .map((d: { msg?: string }) => (d.msg ?? "").replace(/^Value error, /, ""))
-          .filter(Boolean)
-          .join("; ");
-      } else {
-        message = JSON.stringify(parsed.detail ?? parsed);
-      }
-    } catch {
-      // not json, use raw text
-    }
-    throw new ApiError(message || `${res.status} ${res.statusText}`);
-  }
+  if (!res.ok) throw await responseError(res);
   if (res.status === 204) return undefined as T;
+  return res.json() as Promise<T>;
+}
+
+/** Fetch for the public student endpoints: never sends the teacher's token,
+ *  and a 401 (wrong exam password) is an ordinary error - it must not end a
+ *  teacher session that happens to be open in the same browser. */
+async function studentFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    ...options,
+    headers: { "Content-Type": "application/json", ...options.headers },
+  });
+  if (!res.ok) throw await responseError(res);
   return res.json() as Promise<T>;
 }
 
@@ -1078,20 +1099,44 @@ export function fetchTopicRisk(subjectId: string, examType?: AssessmentType | nu
   return apiFetch<TopicRisk>(`/analytics/topic-risk?${params}`);
 }
 
-// ---------- Student attempt API (for the upcoming Student interface) ----------
+// ---------- Student API (the /take/<examId> interface) ----------
 // Public endpoints: no teacher token; the exam password and the attempt id gate access.
+// Mirrors app/schemas/public_exam.py.
+
+/** A question as the student sees it: no answer key, test cases or difficulty. */
+export interface PublicQuestion {
+  id: string;
+  text: string;
+  question_type: QuestionType;
+  marks: number;
+  bloom_level: BloomLevel;
+  options: string[] | null;
+  code_language: string | null;
+  starter_code: string | null;
+}
+
+export interface ExamTiming {
+  state: "upcoming" | "live" | "closed";
+  closed_by: "teacher" | "schedule" | null;
+  server_time: string;
+  go_live_at: string | null;
+  closes_at: string | null;
+  duration_minutes: number | null;
+  opens_in_seconds: number | null;
+  closes_in_seconds: number | null;
+}
+
+export interface PublicExam {
+  id: string;
+  name: string;
+  duration_minutes: number | null;
+  total_marks: number;
+  questions: PublicQuestion[];
+  timing: ExamTiming | null;
+}
 
 export interface AttemptState {
-  timing: {
-    state: "upcoming" | "live" | "closed";
-    closed_by: "teacher" | "schedule" | null;
-    server_time: string;
-    go_live_at: string | null;
-    closes_at: string | null;
-    duration_minutes: number | null;
-    opens_in_seconds: number | null;
-    closes_in_seconds: number | null;
-  };
+  timing: ExamTiming;
   attempt: {
     attempt_id: string;
     started_at: string;
@@ -1101,10 +1146,54 @@ export interface AttemptState {
     submitted: boolean;
     submitted_at: string | null;
   };
-  exam: { id: string; name: string; duration_minutes: number | null; total_marks: number; questions: unknown[] } | null;
+  exam: PublicExam | null; // omitted once the attempt is submitted, expired or the exam closed
   saved_answers: Record<string, string>;
   save_seq: number;
   last_saved_at: string | null;
+}
+
+/** What a student gets back from submitting (no correctness or answer key). */
+export interface SubmissionReceipt {
+  submission_id: string;
+  exam_id: string;
+  student_name: string;
+  student_identifier: string | null;
+  attempt_id: string | null;
+  auto_submitted: boolean;
+  started_at: string | null;
+  submitted_at: string;
+  auto_graded_marks: number;
+  auto_graded_max_marks: number;
+  pending_review_marks: number;
+  pending_review_count: number;
+  total_max_marks: number;
+  answers: { question_id: string; status: "auto_graded" | "pending_review" }[];
+}
+
+export interface StudentIdentity {
+  password: string;
+  student_name: string;
+  student_identifier: string | null;
+}
+
+export function fetchExamTiming(examId: string) {
+  return studentFetch<ExamTiming>(`/exams/${examId}/timing`);
+}
+
+/** Starts this student's attempt, or resumes it (same timer, saved answers). */
+export function startAttempt(examId: string, identity: StudentIdentity) {
+  return studentFetch<AttemptState>(`/exams/${examId}/start`, { method: "POST", body: JSON.stringify(identity) });
+}
+
+export function submitAttempt(examId: string, identity: StudentIdentity, attemptId: string, answers: Record<string, string>) {
+  return studentFetch<SubmissionReceipt>(`/exams/${examId}/submit`, {
+    method: "POST",
+    body: JSON.stringify({
+      ...identity,
+      attempt_id: attemptId,
+      answers: Object.entries(answers).map(([question_id, answer]) => ({ question_id, answer })),
+    }),
+  });
 }
 
 export interface SaveAnswersResult {
@@ -1117,11 +1206,11 @@ export interface SaveAnswersResult {
 }
 
 export function getAttemptState(examId: string, attemptId: string) {
-  return apiFetch<AttemptState>(`/exams/${examId}/attempts/${attemptId}`);
+  return studentFetch<AttemptState>(`/exams/${examId}/attempts/${attemptId}`);
 }
 
 export function saveAttemptAnswers(examId: string, attemptId: string, answers: Record<string, string>, seq: number) {
-  return apiFetch<SaveAnswersResult>(`/exams/${examId}/attempts/${attemptId}/answers`, {
+  return studentFetch<SaveAnswersResult>(`/exams/${examId}/attempts/${attemptId}/answers`, {
     method: "PUT",
     body: JSON.stringify({ answers: Object.entries(answers).map(([question_id, answer]) => ({ question_id, answer })), seq }),
   });

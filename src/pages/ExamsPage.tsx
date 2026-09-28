@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState } from "react";
-import { FileStack, Clock, Lock, LockOpen, Pencil, Trash2, XCircle, CalendarClock, BarChart3, KeyRound, FileCheck2 } from "lucide-react";
+import { FileStack, Clock, Lock, LockOpen, Pencil, Trash2, XCircle, CalendarClock, BarChart3, KeyRound, FileCheck2, Link2, Check } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -28,6 +28,9 @@ function relative(iso: string, now: number): string {
   const text = abs < 60 ? `${abs} min` : abs < 48 * 60 ? `${Math.round(abs / 60)} h` : `${Math.round(abs / 1440)} days`;
   return mins >= 0 ? `in ${text}` : `${text} ago`;
 }
+
+/** The public link students open to take an exam (see StudentApp). */
+const studentExamUrl = (examId: string) => `${window.location.origin}/take/${encodeURIComponent(examId)}`;
 
 const fmt = (iso: string) => new Date(iso).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
 
@@ -69,6 +72,7 @@ export function ExamsPage({
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!activeSubjectId) return;
@@ -92,6 +96,18 @@ export function ExamsPage({
       setExams((es) => es.map((e) => (e.id === id ? updated : e)));
     } finally {
       setBusyId(null);
+    }
+  };
+
+  const handleCopyLink = async (id: string) => {
+    const url = studentExamUrl(id);
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedId(id);
+      setTimeout(() => setCopiedId((c) => (c === id ? null : c)), 2000);
+    } catch {
+      // Clipboard blocked (e.g. not a secure context): let the teacher copy it by hand.
+      window.prompt("Copy this link and share it with your students:", url);
     }
   };
 
@@ -170,7 +186,13 @@ export function ExamsPage({
                         <ScheduleLine exam={exam} now={now} />
                       </div>
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2">
+                      {(exam.bucket === "live" || exam.bucket === "upcoming") && (
+                        <Button size="sm" variant="outline" onClick={() => handleCopyLink(exam.id)} title={studentExamUrl(exam.id)}>
+                          {copiedId === exam.id ? <Check className="h-3.5 w-3.5 text-success" /> : <Link2 className="h-3.5 w-3.5" />}
+                          {copiedId === exam.id ? "Copied" : "Copy student link"}
+                        </Button>
+                      )}
                       <Button size="sm" variant="outline" onClick={() => onEdit(exam.id)}>
                         <Pencil className="h-3.5 w-3.5" /> Edit
                       </Button>

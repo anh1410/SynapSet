@@ -33,8 +33,9 @@ from app.schemas.public_exam import (
     PublicExam,
     PublicQuestion,
     SaveAnswersResult,
+    SubmissionReceipt,
 )
-from app.schemas.submission import AnswerSubmission, Submission, student_key
+from app.schemas.submission import AnswerSubmission, student_key
 from app.services.exam_attempts import AUTO_SUBMITTED_DETAIL, attempt_expired, finalize_ended_attempts, grade_and_record
 
 router = APIRouter(prefix="/api/v1/exams", tags=["submissions"])
@@ -275,10 +276,12 @@ def _resolve_attempt(exam: Exam, request: SubmitExamRequest) -> Attempt | None:
     return get_attempt_store().find(exam.id, student_key(request.student_name, request.student_identifier))
 
 
-@router.post("/{exam_id}/submit", response_model=Submission)
-def submit_exam(exam_id: str, request: SubmitExamRequest) -> Submission:
+@router.post("/{exam_id}/submit", response_model=SubmissionReceipt)
+def submit_exam(exam_id: str, request: SubmitExamRequest) -> SubmissionReceipt:
     """Grades and records the attempt. The final answers are the autosaved
     ones overlaid with anything sent in this request (the newest state).
+    The student gets a trimmed receipt (auto-graded score + marks pending
+    review); the full graded submission stays on the teacher's results API.
 
     Refused once the attempt's deadline (start + duration, capped at the
     closing time) has passed by more than a short network grace, after the
@@ -300,7 +303,9 @@ def submit_exam(exam_id: str, request: SubmitExamRequest) -> Submission:
         if exam.bucket == "closed":
             raise HTTPException(status_code=403, detail="This exam is closed")
         answers = {a.question_id: a.answer for a in request.answers}
-        return grade_and_record(exam, answers, request.student_name, request.student_identifier, None, now)
+        return SubmissionReceipt.from_submission(
+            grade_and_record(exam, answers, request.student_name, request.student_identifier, None, now)
+        )
 
     _refuse_finished(attempt)
     if attempt_expired(attempt, exam, now):
@@ -312,4 +317,6 @@ def submit_exam(exam_id: str, request: SubmitExamRequest) -> Submission:
         raise HTTPException(status_code=403, detail=detail)
 
     answers = {**attempt.saved_answers, **{a.question_id: a.answer for a in request.answers}}
-    return grade_and_record(exam, answers, attempt.student_name, attempt.student_identifier, attempt, now)
+    return SubmissionReceipt.from_submission(
+        grade_and_record(exam, answers, attempt.student_name, attempt.student_identifier, attempt, now)
+    )

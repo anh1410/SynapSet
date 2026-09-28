@@ -91,9 +91,10 @@ def test_submit_uses_latest_saved_answers(api_client, clock, timed):
     r = api_client.post(f"/api/v1/exams/{timed}/submit", json={
         "student_name": "Asha", "attempt_id": aid, "answers": [{"question_id": "m2", "answer": "right"}]})
     assert r.status_code == 200
-    answers = {a["question_id"]: a["answer"] for a in r.json()["answers"]}
-    assert answers == {"m1": "right", "m2": "right"} and r.json()["total_marks_awarded"] == 4
-    assert r.json()["auto_submitted"] is False
+    assert r.json()["auto_graded_marks"] == 4 and r.json()["auto_submitted"] is False
+    sub = api_client.get(f"/api/v1/exams/{timed}/submissions").json()[0]
+    answers = {a["question_id"]: a["answer"] for a in sub["answers"]}
+    assert answers == {"m1": "right", "m2": "right"} and sub["total_marks_awarded"] == 4
     # One attempt per student: no more saving or starting.
     assert _save(api_client, timed, aid, {"m1": "x"}).status_code == 409
     assert api_client.post(f"/api/v1/exams/{timed}/start", json={"student_name": "Asha", "student_identifier": "R01"}).status_code == 409

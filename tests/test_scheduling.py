@@ -144,7 +144,7 @@ def test_submission_before_duration_expires(api_client, clock):
     sub = r.json()
     assert sub["attempt_id"] == started["attempt_id"]
     assert sub["started_at"].startswith("2026-10-01T09:00")
-    assert sub["total_marks_awarded"] == 2
+    assert sub["auto_graded_marks"] == 2
 
 
 def test_submission_within_network_grace_is_accepted(api_client, clock):

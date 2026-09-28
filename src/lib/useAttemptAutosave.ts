@@ -1,6 +1,6 @@
 /**
- * Autosave for a student's timed attempt - built for the upcoming Student
- * interface (not used by any teacher page).
+ * Autosave for a student's timed attempt, used by the Student exam page
+ * (src/pages/student/StudentExam.tsx).
  *
  * - Debounces edits and PUTs only the answers that changed since the last
  *   successful save, each with an increasing sequence number. The server

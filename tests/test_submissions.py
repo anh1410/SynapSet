@@ -110,9 +110,9 @@ def test_submit_grades_immediately_and_scores(api_client):
     )
     assert r.status_code == 200
     body = r.json()
-    assert body["total_marks_awarded"] == 6
+    assert body["auto_graded_marks"] == 6
     assert body["total_max_marks"] == 6
-    assert body["fully_auto_graded"] is True
+    assert body["pending_review_count"] == 0
 
     # And it shows up for the teacher.
     r = api_client.get(f"/api/v1/exams/{exam_id}/submissions")
@@ -130,7 +130,7 @@ def test_submit_wrong_answers_scores_zero(api_client):
         json={"student_name": "Bob", "answers": [{"question_id": mcq_id, "answer": "3"}]},
     )
     assert r.status_code == 200
-    assert r.json()["total_marks_awarded"] == 0
+    assert r.json()["auto_graded_marks"] == 0
 
 
 def test_submit_wrong_password_rejected(api_client):

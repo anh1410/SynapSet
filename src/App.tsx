@@ -13,6 +13,7 @@ import { PatternsPage } from "@/pages/PatternsPage";
 import { PerformancePage } from "@/pages/PerformancePage";
 import { PaperReviewPage } from "@/pages/PaperReviewPage";
 import { AuthPage } from "@/pages/AuthPage";
+import { StudentApp } from "@/pages/student/StudentApp";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AuthProvider, useAuth } from "@/lib/AuthContext";
@@ -200,7 +201,17 @@ function Gate() {
   return <AppShell />;
 }
 
+/** `/take/<examId>` is the student interface: public, no teacher login. */
+function studentExamId(): string | null {
+  const match = window.location.pathname.match(/^\/take\/([^/]+)\/?$/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
 export default function App() {
+  const takeExamId = studentExamId();
+  if (takeExamId) {
+    return <StudentApp examId={takeExamId} />;
+  }
   return (
     <AuthProvider>
       <Gate />

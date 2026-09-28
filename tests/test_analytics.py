@@ -212,7 +212,9 @@ def test_submission_snapshots_answer_and_metadata(api_client):
         ],
     })
     assert r.status_code == 200
-    answers = {a["question_id"]: a for a in r.json()["answers"]}
+    # The snapshot lives on the teacher's view (the student only gets a trimmed receipt).
+    sub = api_client.get(f"/api/v1/exams/{exam_id}/submissions").json()[0]
+    answers = {a["question_id"]: a for a in sub["answers"]}
     assert answers["essay"]["answer"] == "Because..."
     assert answers["essay"]["skill_category"] == "reasoning"
     assert answers["mcq"]["skill_category"] == "conceptual"
@@ -220,16 +222,17 @@ def test_submission_snapshots_answer_and_metadata(api_client):
     assert answers["code"]["test_cases_passed"] == 1  # 2+2 == 4 happens to pass; 3+2 != 6
     assert answers["code"]["test_cases_total"] == 2
     assert answers["mcq"]["topic_ids"] == ["arith"]
-    assert r.json()["fully_auto_graded"] is False
+    assert sub["fully_auto_graded"] is False
 
 
 def test_manual_grading_updates_totals_and_analytics(api_client):
     _seed(api_client)
     exam_id = _live_exam(api_client, ["mcq", "essay"], exam_type="MSE")
-    sub = api_client.post(f"/api/v1/exams/{exam_id}/submit", json={
+    receipt = api_client.post(f"/api/v1/exams/{exam_id}/submit", json={
         "student_name": "Asha", "student_identifier": "R01",
         "answers": [{"question_id": "mcq", "answer": "4"}, {"question_id": "essay", "answer": "..."}],
     }).json()
+    sub = {"id": receipt["submission_id"]}
 
     ov = api_client.get(f"/api/v1/analytics/overview?subject_id={api_client.subject_id}").json()
     assert ov["summary"]["pending_answers"] == 1

@@ -3,7 +3,7 @@ import type { AutosaveStatus as Status } from "@/lib/useAttemptAutosave";
 import { cn } from "@/lib/utils";
 
 /** Small "Saved / Saving... / Connection lost" indicator for a student's
- *  attempt, driven by useAttemptAutosave. For the upcoming Student interface. */
+ *  attempt, driven by useAttemptAutosave. Shown in the Student exam header. */
 export function AutosaveStatus({ status, lastSavedAt, className }: { status: Status; lastSavedAt: Date | null; className?: string }) {
   const base = cn("inline-flex items-center gap-1.5 text-xs", className);
   switch (status) {
