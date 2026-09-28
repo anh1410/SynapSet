@@ -110,6 +110,7 @@ export function ExamsPage({
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="text-sm font-semibold text-foreground">{exam.name}</p>
                         <Badge variant={bucketVariant[exam.bucket]}>{bucketLabels[exam.bucket]}</Badge>
+                        {exam.exam_type !== "QUIZ" && <Badge variant="default">{exam.exam_type}</Badge>}
                         {exam.password ? (
                           <Lock className="h-3.5 w-3.5 text-muted-foreground" />
                         ) : (

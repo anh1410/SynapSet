@@ -28,6 +28,9 @@ class SubmissionStore:
         self.submissions[submission.id] = submission
         self.save()
 
+    def get(self, submission_id: str) -> Submission | None:
+        return self.submissions.get(submission_id)
+
     def list_by_exam(self, exam_id: str) -> list[Submission]:
         return sorted(
             (s for s in self.submissions.values() if s.exam_id == exam_id),

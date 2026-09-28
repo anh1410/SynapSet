@@ -5,6 +5,8 @@ from pydantic import BaseModel, Field, computed_field
 
 ExamStatus = Literal["draft", "scheduled", "closed"]
 ExamBucket = Literal["draft", "upcoming", "live", "closed"]
+# QUIZ = the original free-form weekly quiz; MSE/SEE = built against an exam pattern.
+AssessmentType = Literal["QUIZ", "MSE", "SEE"]
 
 
 class Exam(BaseModel):
@@ -18,6 +20,8 @@ class Exam(BaseModel):
     go_live_at: datetime | None = None
     password: str | None = None
     status: ExamStatus = "draft"
+    exam_type: AssessmentType = "QUIZ"
+    pattern_id: str | None = None  # the ExamPattern this exam was assembled against, if any
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 

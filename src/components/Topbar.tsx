@@ -16,6 +16,8 @@ const titles: Record<Page, { title: string; subtitle: string }> = {
   exams: { title: "Exams", subtitle: "Every quiz you've built — upcoming, live, and closed" },
   results: { title: "Results", subtitle: "Auto-graded scores as students submit" },
   answerKey: { title: "Answer Key", subtitle: "Every question and its correct answer" },
+  patterns: { title: "Exam Patterns", subtitle: "MSE and SEE question paper patterns for this subject" },
+  performance: { title: "Student Performance", subtitle: "Class and individual analysis across quizzes and exams" },
 };
 
 function initialsFor(name: string): string {

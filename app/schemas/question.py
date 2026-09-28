@@ -4,6 +4,7 @@ from enum import Enum
 from pydantic import BaseModel, Field
 
 from app.schemas.bloom import BloomLevel
+from app.schemas.skill import SkillCategory, resolve_skill_category
 
 
 class QuestionType(str, Enum):
@@ -43,5 +44,13 @@ class Question(BaseModel):
     embedding_id: str | None = None  # reference into the vector store
     is_duplicate_of: str | None = None  # id of the original question, if flagged
 
+    # Optional teacher override; when unset the category is derived from
+    # question_type + bloom_level (see app.schemas.skill).
+    skill_category: SkillCategory | None = None
+
     source_document: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+    @property
+    def effective_skill_category(self) -> SkillCategory:
+        return resolve_skill_category(self.question_type.value, int(self.bloom_level), self.skill_category)

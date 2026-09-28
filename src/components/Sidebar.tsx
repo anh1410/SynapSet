@@ -5,6 +5,8 @@ import {
   Library,
   FileStack,
   ClipboardList,
+  LayoutTemplate,
+  TrendingUp,
   X,
   GraduationCap,
 } from "lucide-react";
@@ -16,8 +18,10 @@ const nav: { id: Page; label: string; icon: typeof LayoutGrid }[] = [
   { id: "upload", label: "Upload Materials", icon: UploadCloud },
   { id: "analysis", label: "Topic Analysis", icon: Network },
   { id: "bank", label: "Question Bank", icon: Library },
+  { id: "patterns", label: "Exam Patterns", icon: LayoutTemplate },
   { id: "exam", label: "Exam Builder", icon: FileStack },
   { id: "exams", label: "Exams", icon: ClipboardList },
+  { id: "performance", label: "Student Performance", icon: TrendingUp },
 ];
 
 export function Sidebar({

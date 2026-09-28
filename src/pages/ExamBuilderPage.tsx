@@ -11,15 +11,28 @@ import {
   Lock,
   CalendarClock,
   KeyRound,
+  LayoutTemplate,
+  Wand2,
+  CheckCircle2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
+import { PatternCompliancePanel } from "@/components/PatternCompliancePanel";
 import {
   BLOOM_LEVELS,
   BLOOM_LABELS,
+  CONSTRAINT_LABELS,
+  SKILL_LABELS,
+  assembleFromPattern,
+  checkAgainstPattern,
+  effectiveSkill,
+  listPatterns,
+  type ComplianceReport,
+  type ExamPattern,
   QUESTION_TYPE_LABELS,
   QUESTION_TYPE_ORDER,
   createExam,
@@ -61,13 +74,27 @@ function makeRow(topics: GraphNode[]): BuilderRow {
   };
 }
 
+function rowFromQuestion(q: Question): BuilderRow {
+  return {
+    rowId: q.id,
+    status: "generated",
+    topicId: q.topic_ids[0] ?? "",
+    questionType: q.question_type,
+    bloomLevel: q.bloom_level,
+    marks: q.marks,
+    question: q,
+  };
+}
+
 export function ExamBuilderPage({
   seedQuestionIds,
   editExamId,
+  initialPatternId = null,
   onSaved,
 }: {
   seedQuestionIds: string[];
   editExamId: string | null;
+  initialPatternId?: string | null;
   onSaved: (examId: string) => void;
 }) {
   const { activeSubjectId } = useAuth();
@@ -82,6 +109,28 @@ export function ExamBuilderPage({
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [showAnswerKey, setShowAnswerKey] = useState(false);
+  const [patterns, setPatterns] = useState<ExamPattern[]>([]);
+  const [patternId, setPatternId] = useState<string | null>(initialPatternId);
+  const [report, setReport] = useState<ComplianceReport | null>(null);
+  const [assembling, setAssembling] = useState(false);
+  const [generateMissing, setGenerateMissing] = useState(false);
+  const [assembleNote, setAssembleNote] = useState<{ ok: boolean; lines: string[] } | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const pattern = patterns.find((p) => p.id === patternId) ?? null;
+
+  useEffect(() => {
+    if (!activeSubjectId) return;
+    listPatterns(activeSubjectId).then(setPatterns);
+  }, [activeSubjectId]);
+
+  // A pattern chosen for a brand-new exam supplies its name and duration.
+  useEffect(() => {
+    if (!pattern || examId) return;
+    setExamName(`${pattern.exam_type} — ${pattern.name}`);
+    setDuration(pattern.duration_minutes);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pattern?.id]);
 
   useEffect(() => {
     if (!activeSubjectId) return;
@@ -98,17 +147,8 @@ export function ExamBuilderPage({
         setDuration(exam.duration_minutes ?? 30);
         setGoLiveAt(exam.go_live_at ? exam.go_live_at.slice(0, 16) : "");
         setPassword(exam.password ?? "");
-        setRows(
-          questions.map((q) => ({
-            rowId: q.id,
-            status: "generated" as const,
-            topicId: q.topic_ids[0] ?? "",
-            questionType: q.question_type,
-            bloomLevel: q.bloom_level,
-            marks: q.marks,
-            question: q,
-          }))
-        );
+        setPatternId(exam.pattern_id);
+        setRows(questions.map(rowFromQuestion));
         setLoaded(true);
       });
       return;
@@ -121,15 +161,7 @@ export function ExamBuilderPage({
           seedQuestionIds
             .map((id) => byId.get(id))
             .filter((q): q is Question => Boolean(q))
-            .map((q) => ({
-              rowId: q.id,
-              status: "generated" as const,
-              topicId: q.topic_ids[0] ?? "",
-              questionType: q.question_type,
-              bloomLevel: q.bloom_level,
-              marks: q.marks,
-              question: q,
-            }))
+            .map(rowFromQuestion)
         );
         setLoaded(true);
       });
@@ -141,7 +173,7 @@ export function ExamBuilderPage({
   }, [editExamId, seedQuestionIds, loaded, activeSubjectId]);
 
   useEffect(() => {
-    if (loaded && !editExamId && seedQuestionIds.length === 0 && rows.length === 0 && topics.length > 0) {
+    if (loaded && !editExamId && !initialPatternId && seedQuestionIds.length === 0 && rows.length === 0 && topics.length > 0) {
       setRows([makeRow(topics)]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -192,12 +224,67 @@ export function ExamBuilderPage({
 
   const generatedRows = rows.filter((r) => r.status === "generated" && r.question);
   const totalMarks = generatedRows.reduce((s, r) => s + (r.question?.marks ?? 0), 0);
+  const selectedIdsKey = generatedRows.map((r) => r.question!.id).join(",");
+
+  // Live compliance check against the chosen pattern (same rules the assembler uses).
+  useEffect(() => {
+    if (!patternId) {
+      setReport(null);
+      return;
+    }
+    const ids = selectedIdsKey ? selectedIdsKey.split(",") : [];
+    const t = setTimeout(() => {
+      checkAgainstPattern(patternId, ids).then(setReport).catch(() => setReport(null));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [patternId, selectedIdsKey]);
+
+  const sectionOf = (questionId: string) => report?.sections.find((s) => s.question_ids.includes(questionId))?.name;
+
+  const handleAssemble = async () => {
+    if (!patternId || !activeSubjectId) return;
+    setAssembling(true);
+    setAssembleNote(null);
+    try {
+      const { assembly, generated } = await assembleFromPattern(patternId, generateMissing);
+      const bank = await fetchQuestions(activeSubjectId);
+      const byId = new Map(bank.map((q) => [q.id, q]));
+      const picked = assembly.question_ids.map((id) => byId.get(id)).filter((q): q is Question => Boolean(q));
+      setRows(picked.map(rowFromQuestion));
+
+      const lines: string[] = [];
+      if (assembly.satisfied) {
+        lines.push(`Assembled ${picked.length} questions meeting every pattern constraint.`);
+      } else {
+        lines.push(
+          `The question bank can't satisfy this pattern yet (blocked by ${assembly.blocking.map((b) => CONSTRAINT_LABELS[b]).join(", ")}). ` +
+            `This draft relaxes ${assembly.relaxed.map((b) => CONSTRAINT_LABELS[b]).join(", ")}.`
+        );
+      }
+      if (generated.length) {
+        const made = generated.filter((g) => g.question_id).length;
+        lines.push(`Generated ${made} new question${made === 1 ? "" : "s"} into the bank for short sections.`);
+        generated
+          .filter((g) => g.skipped_reason)
+          .forEach((g) => lines.push(`${g.request.section} (${g.request.topic_name}): ${g.skipped_reason}`));
+      } else if (!assembly.satisfied && !generateMissing && assembly.blocking.includes("sections")) {
+        lines.push("Tick “Generate missing questions” to have the AI write questions for the short sections.");
+      }
+      setAssembleNote({ ok: assembly.satisfied, lines });
+    } catch (e) {
+      setAssembleNote({ ok: false, lines: [e instanceof Error ? e.message : "Assembly failed"] });
+    } finally {
+      setAssembling(false);
+    }
+  };
   const anyError = rows.some((r) => r.status === "error");
   const anyPending = rows.some((r) => r.status === "pending");
 
   const handleSave = async () => {
     if (generatedRows.length === 0 || !activeSubjectId) return;
     setSaving(true);
+    setSaveError(null);
+    const typeInfo = { exam_type: pattern ? pattern.exam_type : ("QUIZ" as const), pattern_id: pattern ? pattern.id : null };
     try {
       const question_ids = generatedRows.map((r) => r.question!.id);
       const scheduleUpdate = {
@@ -212,6 +299,7 @@ export function ExamBuilderPage({
           question_ids,
           total_marks: totalMarks,
           duration_minutes: duration,
+          ...typeInfo,
           ...scheduleUpdate,
         });
       } else {
@@ -221,6 +309,7 @@ export function ExamBuilderPage({
           question_ids,
           total_marks: totalMarks,
           duration_minutes: duration,
+          ...typeInfo,
         });
         savedId = exam.id;
         if (scheduleUpdate.go_live_at || scheduleUpdate.password) {
@@ -228,6 +317,8 @@ export function ExamBuilderPage({
         }
       }
       onSaved(savedId);
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : "Couldn't save the exam");
     } finally {
       setSaving(false);
     }
@@ -241,11 +332,63 @@ export function ExamBuilderPage({
             <FileStack className="h-4 w-4 text-primary" />
             <CardTitle>Exam Builder</CardTitle>
           </div>
-          <CardDescription>Add questions one at a time — pick topic, type, Bloom's level, and marks for each</CardDescription>
+          <CardDescription>
+            Add questions one at a time, or pick an MSE/SEE pattern and let the assembler fill it from your question bank
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div className="space-y-2 rounded-lg border border-border p-3">
+            <p className="flex items-center gap-1.5 text-[11px] font-semibold text-foreground">
+              <LayoutTemplate className="h-3.5 w-3.5" /> Exam pattern
+            </p>
+            <Select
+              value={patternId ?? ""}
+              onChange={(e) => {
+                setPatternId(e.target.value || null);
+                setAssembleNote(null);
+              }}
+              aria-label="Exam pattern"
+            >
+              <option value="">None — free-form quiz</option>
+              {patterns.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.exam_type} · {p.name} ({p.total_marks} marks)
+                </option>
+              ))}
+            </Select>
+            {patterns.length === 0 && <p className="text-[11px] text-muted-foreground">Create MSE/SEE patterns under Exam Patterns.</p>}
+            {pattern && (
+              <>
+                <label className="flex items-start gap-2 text-[11px] text-muted-foreground">
+                  <Checkbox checked={generateMissing} onCheckedChange={setGenerateMissing} className="mt-0.5" />
+                  <span>Generate missing questions with AI when the bank can't fill a section (Graph-RAG, saved to the bank)</span>
+                </label>
+                <Button size="sm" className="w-full" onClick={handleAssemble} disabled={assembling}>
+                  <Wand2 className="h-3.5 w-3.5" />
+                  {assembling ? (generateMissing ? "Assembling & generating..." : "Assembling...") : "Auto-assemble from pattern"}
+                </Button>
+                {rows.length > 0 && !assembling && <p className="text-[11px] text-muted-foreground">Replaces the current question list.</p>}
+              </>
+            )}
+            {assembleNote && (
+              <div className={cn("space-y-1 rounded-md p-2 text-[11px] text-foreground", assembleNote.ok ? "bg-success/[0.06]" : "bg-warning/[0.06]")}>
+                {assembleNote.lines.map((line, i) => (
+                  <p key={i} className={cn(i === 0 && "flex items-start gap-1 font-medium")}>
+                    {i === 0 &&
+                      (assembleNote.ok ? (
+                        <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0 text-success" />
+                      ) : (
+                        <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-warning" />
+                      ))}
+                    {line}
+                  </p>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-foreground">Quiz Name</label>
+            <label className="text-xs font-medium text-foreground">{pattern ? "Exam Name" : "Quiz Name"}</label>
             <Input value={examName} onChange={(e) => setExamName(e.target.value)} />
           </div>
           <div className="space-y-1.5">
@@ -380,19 +523,23 @@ export function ExamBuilderPage({
             </Button>
           )}
 
+          {saveError && <p className="text-xs text-destructive">{saveError}</p>}
           <Button className="w-full" onClick={handleSave} disabled={saving || generatedRows.length === 0}>
-            <Save className="h-4 w-4" /> {saving ? "Saving..." : examId ? "Save Changes" : "Save Quiz"}
+            <Save className="h-4 w-4" /> {saving ? "Saving..." : examId ? "Save Changes" : pattern ? `Save ${pattern.exam_type}` : "Save Quiz"}
           </Button>
         </CardContent>
       </Card>
 
       <div className="space-y-4 lg:col-span-2">
+        {pattern && report && <PatternCompliancePanel pattern={pattern} report={report} />}
         {generatedRows.length === 0 ? (
           <Card>
             <CardContent className="flex flex-col items-center justify-center py-16 text-center">
               <FileStack className="h-8 w-8 text-muted-foreground" />
               <p className="mt-3 text-sm font-medium text-foreground">No questions yet</p>
-              <p className="mt-1 text-xs text-muted-foreground">Add a question, configure it, and click "Generate"</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {pattern ? "Click “Auto-assemble from pattern”, or add questions manually" : 'Add a question, configure it, and click "Generate"'}
+              </p>
             </CardContent>
           </Card>
         ) : (
@@ -458,7 +605,10 @@ export function ExamBuilderPage({
                       </div>
                     )}
                     <div className="flex flex-wrap gap-1.5">
+                      {pattern &&
+                        (sectionOf(q.id) ? <Badge variant="default">{sectionOf(q.id)}</Badge> : <Badge variant="warning">No section fits</Badge>)}
                       <Badge variant="outline">{QUESTION_TYPE_LABELS[q.question_type]}</Badge>
+                      <Badge variant="outline">{SKILL_LABELS[effectiveSkill(q)]}</Badge>
                       <Badge variant="outline">{topicName(row.topicId)}</Badge>
                       <Badge variant="outline">{q.marks} marks</Badge>
                       <Badge variant="accent">{BLOOM_LABELS[q.bloom_level]}</Badge>

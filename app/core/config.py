@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     # Saved exams (weekly quizzes)
     exam_store_path: str = str(BASE_DIR / "data" / "exams.json")
 
+    # Question paper patterns (MSE/SEE templates)
+    pattern_store_path: str = str(BASE_DIR / "data" / "exam_patterns.json")
+
     # Graded student submissions
     submission_store_path: str = str(BASE_DIR / "data" / "submissions.json")
 

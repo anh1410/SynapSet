@@ -15,6 +15,7 @@ data/question_banks/
 data/documents/
 *.gpickle
 exams.json
+exam_patterns.json
 teachers.json
 submissions.json
 subjects.json

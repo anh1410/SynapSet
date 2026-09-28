@@ -10,13 +10,17 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import {
   BLOOM_LABELS,
+  SKILL_LABELS,
   deleteQuestion,
   difficultyBucket,
+  effectiveSkill,
   fetchGraph,
   fetchQuestions,
+  saveQuestion,
   type DifficultyBucket,
   type GraphNode,
   type Question,
+  type SkillCategory,
 } from "@/lib/api";
 import { useAuth } from "@/lib/AuthContext";
 import { cn } from "@/lib/utils";
@@ -77,6 +81,14 @@ export function BankPage({
     await deleteQuestion(activeSubjectId, id);
     setQuestions((qs) => qs.filter((q) => q.id !== id));
     setSelected((s) => s.filter((x) => x !== id));
+  };
+
+  // Skill category is derived from type + Bloom's level; the teacher can pin
+  // it when the default is wrong. "" = back to automatic.
+  const handleSkillChange = async (q: Question, value: SkillCategory | "") => {
+    if (!activeSubjectId) return;
+    const updated = await saveQuestion(activeSubjectId, { ...q, skill_category: value || null });
+    setQuestions((qs) => qs.map((x) => (x.id === q.id ? updated : x)));
   };
 
   const handleBulkDelete = async () => {
@@ -169,6 +181,7 @@ export function BankPage({
                     <th className="px-4 py-2.5 font-medium">Difficulty</th>
                     <th className="px-4 py-2.5 font-medium">Marks</th>
                     <th className="px-4 py-2.5 font-medium">Bloom's</th>
+                    <th className="px-4 py-2.5 font-medium">Skill</th>
                     <th className="px-4 py-2.5"></th>
                   </tr>
                 </thead>
@@ -198,6 +211,20 @@ export function BankPage({
                         <td className="px-4 py-3 text-muted-foreground">{q.marks}</td>
                         <td className="px-4 py-3">
                           <Badge variant="accent">{BLOOM_LABELS[q.bloom_level]}</Badge>
+                        </td>
+                        <td className="px-4 py-3">
+                          <Select
+                            value={q.skill_category ?? ""}
+                            onChange={(e) => handleSkillChange(q, e.target.value as SkillCategory | "")}
+                            className="h-7 w-36 text-xs"
+                            aria-label="Skill category"
+                            title="Used by Student Performance to split conceptual, reasoning, and coding scores"
+                          >
+                            <option value="">Auto ({SKILL_LABELS[effectiveSkill({ ...q, skill_category: null })]})</option>
+                            <option value="conceptual">Conceptual</option>
+                            <option value="reasoning">Reasoning</option>
+                            <option value="coding">Coding</option>
+                          </Select>
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex justify-end gap-1">

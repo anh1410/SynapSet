@@ -9,6 +9,8 @@ import { ExamBuilderPage } from "@/pages/ExamBuilderPage";
 import { ExamsPage } from "@/pages/ExamsPage";
 import { ExamResultsPage } from "@/pages/ExamResultsPage";
 import { AnswerKeyPage } from "@/pages/AnswerKeyPage";
+import { PatternsPage } from "@/pages/PatternsPage";
+import { PerformancePage } from "@/pages/PerformancePage";
 import { AuthPage } from "@/pages/AuthPage";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,7 +25,9 @@ export type Page =
   | "exam"
   | "exams"
   | "results"
-  | "answerKey";
+  | "answerKey"
+  | "patterns"
+  | "performance";
 
 function FirstSubjectGate() {
   const { createSubject } = useAuth();
@@ -75,6 +79,7 @@ function AppShell() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [examSeedIds, setExamSeedIds] = useState<string[]>([]);
   const [editExamId, setEditExamId] = useState<string | null>(null);
+  const [builderPatternId, setBuilderPatternId] = useState<string | null>(null);
   const [resultsExamId, setResultsExamId] = useState<string | null>(null);
   const [answerKeyExamId, setAnswerKeyExamId] = useState<string | null>(null);
   const [bankSearch, setBankSearch] = useState<string | undefined>(undefined);
@@ -82,18 +87,28 @@ function AppShell() {
   const goToExamBuilder = (questionIds: string[]) => {
     setExamSeedIds(questionIds);
     setEditExamId(null);
+    setBuilderPatternId(null);
     setPage("exam");
   };
 
   const goToNewExam = () => {
     setExamSeedIds([]);
     setEditExamId(null);
+    setBuilderPatternId(null);
     setPage("exam");
   };
 
   const goToEditExam = (examId: string) => {
     setExamSeedIds([]);
     setEditExamId(examId);
+    setBuilderPatternId(null);
+    setPage("exam");
+  };
+
+  const goToBuildFromPattern = (patternId: string) => {
+    setExamSeedIds([]);
+    setEditExamId(null);
+    setBuilderPatternId(patternId);
     setPage("exam");
   };
 
@@ -140,13 +155,21 @@ function AppShell() {
             {page === "analysis" && <AnalysisPage />}
             {page === "bank" && <BankPage onSendToExam={goToExamBuilder} initialSearch={bankSearch} />}
             {page === "exam" && (
-              <ExamBuilderPage seedQuestionIds={examSeedIds} editExamId={editExamId} onSaved={goToExams} />
+              <ExamBuilderPage
+                key={`${editExamId ?? "new"}-${builderPatternId ?? "free"}-${examSeedIds.join(",")}`}
+                seedQuestionIds={examSeedIds}
+                editExamId={editExamId}
+                initialPatternId={builderPatternId}
+                onSaved={goToExams}
+              />
             )}
             {page === "exams" && (
               <ExamsPage onEdit={goToEditExam} onViewResults={goToResults} onViewAnswerKey={goToAnswerKey} />
             )}
             {page === "results" && resultsExamId && <ExamResultsPage examId={resultsExamId} onBack={goToExams} />}
             {page === "answerKey" && answerKeyExamId && <AnswerKeyPage examId={answerKeyExamId} onBack={goToExams} />}
+            {page === "patterns" && <PatternsPage onBuildExam={goToBuildFromPattern} />}
+            {page === "performance" && <PerformancePage />}
           </div>
         </main>
       </div>

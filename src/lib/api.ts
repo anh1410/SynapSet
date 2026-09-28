@@ -41,6 +41,21 @@ export const QUESTION_TYPE_ORDER: QuestionType[] = [
 
 export type Difficulty = "Easy" | "Medium" | "Hard";
 
+export type SkillCategory = "conceptual" | "reasoning" | "coding";
+
+export const SKILL_LABELS: Record<SkillCategory, string> = {
+  conceptual: "Conceptual",
+  reasoning: "Reasoning",
+  coding: "Coding",
+};
+
+/** Mirrors app/schemas/skill.py resolve_skill_category. */
+export function effectiveSkill(q: Pick<Question, "question_type" | "bloom_level" | "skill_category">): SkillCategory {
+  if (q.skill_category) return q.skill_category;
+  if (q.question_type === "code_fix") return "coding";
+  return q.bloom_level >= 3 ? "reasoning" : "conceptual";
+}
+
 // ---------- Core resources ----------
 
 export interface CodeTestCase {
@@ -65,6 +80,7 @@ export interface Question {
   difficulty_score: number | null;
   embedding_id: string | null;
   is_duplicate_of: string | null;
+  skill_category?: SkillCategory | null;
   source_document: string | null;
   created_at: string;
 }
@@ -165,9 +181,19 @@ export interface Exam {
   password: string | null;
   status: ExamStatus;
   bucket: ExamBucket;
+  exam_type: AssessmentType;
+  pattern_id: string | null;
   created_at: string;
   updated_at: string;
 }
+
+export type AssessmentType = "QUIZ" | "MSE" | "SEE";
+
+export const ASSESSMENT_TYPE_LABELS: Record<AssessmentType, string> = {
+  QUIZ: "Quiz",
+  MSE: "MSE",
+  SEE: "SEE",
+};
 
 // ---------- fetch helpers ----------
 
@@ -198,7 +224,17 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
     let message = text;
     try {
       const parsed = JSON.parse(text);
-      message = typeof parsed.detail === "string" ? parsed.detail : JSON.stringify(parsed.detail ?? parsed);
+      if (typeof parsed.detail === "string") {
+        message = parsed.detail;
+      } else if (Array.isArray(parsed.detail)) {
+        // FastAPI/pydantic validation errors: keep just the human-readable messages.
+        message = parsed.detail
+          .map((d: { msg?: string }) => (d.msg ?? "").replace(/^Value error, /, ""))
+          .filter(Boolean)
+          .join("; ");
+      } else {
+        message = JSON.stringify(parsed.detail ?? parsed);
+      }
     } catch {
       // not json, use raw text
     }
@@ -324,6 +360,8 @@ export function createExam(data: {
   question_ids?: string[];
   total_marks?: number;
   duration_minutes?: number | null;
+  exam_type?: AssessmentType;
+  pattern_id?: string | null;
 }) {
   return apiFetch<Exam>("/exams", { method: "POST", body: JSON.stringify(data) });
 }
@@ -346,6 +384,8 @@ export function updateExam(
     go_live_at: string | null;
     password: string | null;
     status: ExamStatus;
+    exam_type: AssessmentType;
+    pattern_id: string | null;
   }>
 ) {
   return apiFetch<Exam>(`/exams/${id}`, { method: "PATCH", body: JSON.stringify(data) });
@@ -365,6 +405,15 @@ export interface GradedAnswer {
   marks_awarded: number;
   max_marks: number;
   detail: string;
+  answer?: string | null;
+  manually_graded?: boolean;
+  feedback?: string | null;
+  bloom_level?: number | null;
+  topic_ids?: string[] | null;
+  skill_category?: SkillCategory | null;
+  difficulty_score?: number | null;
+  test_cases_passed?: number | null;
+  test_cases_total?: number | null;
 }
 
 export interface Submission {
@@ -381,6 +430,327 @@ export interface Submission {
 
 export function getExamSubmissions(examId: string) {
   return apiFetch<Submission[]>(`/exams/${examId}/submissions`);
+}
+
+export function gradeSubmissionAnswer(
+  examId: string,
+  submissionId: string,
+  questionId: string,
+  marksAwarded: number,
+  feedback?: string
+) {
+  return apiFetch<Submission>(
+    `/exams/${examId}/submissions/${submissionId}/answers/${encodeURIComponent(questionId)}`,
+    { method: "PATCH", body: JSON.stringify({ marks_awarded: marksAwarded, feedback: feedback || null }) }
+  );
+}
+
+// ---------- Question paper patterns ----------
+
+export type PatternExamType = "MSE" | "SEE";
+export type DifficultyLevel = "easy" | "medium" | "hard";
+
+export const DIFFICULTY_LEVELS: DifficultyLevel[] = ["easy", "medium", "hard"];
+
+export interface PatternSection {
+  name: string;
+  instructions: string;
+  num_questions: number;
+  marks_per_question: number;
+  question_types: QuestionType[];
+  bloom_levels: BloomLevel[];
+}
+
+export interface PatternUnit {
+  unit: number;
+  name: string;
+  topic_ids: string[];
+  percent: number;
+}
+
+export interface ExamPatternFields {
+  name: string;
+  exam_type: PatternExamType;
+  description: string;
+  total_marks: number;
+  duration_minutes: number;
+  sections: PatternSection[];
+  bloom_distribution: { bloom_level: BloomLevel; percent: number }[];
+  difficulty_distribution: { difficulty: DifficultyLevel; percent: number }[];
+  units: PatternUnit[];
+  co_requirements: { co_code: string; min_questions: number }[];
+  tolerance_percent: number;
+}
+
+export interface ExamPattern extends ExamPatternFields {
+  id: string;
+  teacher_id: string;
+  subject_id: string;
+  source_filename: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SectionReport {
+  name: string;
+  required: number;
+  marks_per_question: number;
+  filled: number;
+  question_ids: string[];
+  eligible_in_pool: number;
+}
+
+export interface DistributionRow {
+  key: string;
+  label: string;
+  target_percent: number | null;
+  actual_percent: number;
+  actual_marks: number;
+  within_tolerance: boolean;
+}
+
+export interface ComplianceReport {
+  compliant: boolean;
+  target_marks: number;
+  actual_marks: number;
+  sections: SectionReport[];
+  bloom: DistributionRow[];
+  difficulty: DistributionRow[];
+  units: DistributionRow[];
+  course_outcomes: { co_code: string; min_questions: number; actual: number; met: boolean }[];
+  topics_covered: number;
+  unassigned_question_ids: string[];
+  issues: string[];
+}
+
+export type ConstraintFamily = "sections" | "bloom" | "difficulty" | "units" | "course_outcomes";
+
+export const CONSTRAINT_LABELS: Record<ConstraintFamily, string> = {
+  sections: "section slots",
+  bloom: "Bloom's distribution",
+  difficulty: "difficulty distribution",
+  units: "unit distribution",
+  course_outcomes: "course-outcome coverage",
+};
+
+export interface AssembleResponse {
+  assembly: {
+    status: "optimal" | "feasible" | "infeasible";
+    satisfied: boolean;
+    relaxed: ConstraintFamily[];
+    blocking: ConstraintFamily[];
+    question_ids: string[];
+    report: ComplianceReport;
+  };
+  generated: {
+    request: { section: string; topic_name: string; question_type: QuestionType; bloom_level: BloomLevel; marks: number };
+    question_id: string | null;
+    skipped_reason: string | null;
+  }[];
+}
+
+export interface PatternImportResult {
+  draft: ExamPatternFields;
+  warnings: string[];
+  source_filename: string;
+  valid: boolean;
+}
+
+export function listPatternPresets() {
+  return apiFetch<ExamPatternFields[]>("/patterns/presets");
+}
+
+export function listPatterns(subjectId: string) {
+  return apiFetch<ExamPattern[]>(`/patterns?subject_id=${encodeURIComponent(subjectId)}`);
+}
+
+export function createPattern(subjectId: string, pattern: ExamPatternFields, sourceFilename?: string | null) {
+  return apiFetch<ExamPattern>("/patterns", {
+    method: "POST",
+    body: JSON.stringify({ ...pattern, subject_id: subjectId, source_filename: sourceFilename ?? null }),
+  });
+}
+
+export function updatePattern(id: string, pattern: ExamPatternFields) {
+  return apiFetch<ExamPattern>(`/patterns/${id}`, { method: "PUT", body: JSON.stringify(pattern) });
+}
+
+export function deletePattern(id: string) {
+  return apiFetch<{ deleted: string }>(`/patterns/${id}`, { method: "DELETE" });
+}
+
+export function importPatternDocument(subjectId: string, file: File, examTypeHint?: PatternExamType) {
+  const form = new FormData();
+  form.append("subject_id", subjectId);
+  form.append("file", file);
+  if (examTypeHint) form.append("exam_type_hint", examTypeHint);
+  return apiFetch<PatternImportResult>("/patterns/import", { method: "POST", body: form });
+}
+
+export function assembleFromPattern(id: string, generateMissing: boolean, maxGenerate = 8) {
+  return apiFetch<AssembleResponse>(`/patterns/${id}/assemble`, {
+    method: "POST",
+    body: JSON.stringify({ generate_missing: generateMissing, max_generate: maxGenerate }),
+  });
+}
+
+export function checkAgainstPattern(id: string, questionIds: string[]) {
+  return apiFetch<ComplianceReport>(`/patterns/${id}/check`, {
+    method: "POST",
+    body: JSON.stringify({ question_ids: questionIds }),
+  });
+}
+
+// ---------- Performance analytics ----------
+
+export type Band = "strong" | "developing" | "needs_support" | "insufficient";
+
+export const BAND_LABELS: Record<Band, string> = {
+  strong: "Strong",
+  developing: "Developing",
+  needs_support: "Needs support",
+  insufficient: "Not enough data",
+};
+
+export interface ScoreStat {
+  awarded: number;
+  max: number;
+  percent: number | null;
+  answers: number;
+  pending: number;
+}
+
+export interface GradeInfo {
+  grade: string;
+  label: string;
+}
+
+export interface BreakdownRow {
+  key: string;
+  label: string;
+  score: ScoreStat;
+  band: Band;
+}
+
+export interface SkillRow {
+  skill: SkillCategory;
+  label: string;
+  score: ScoreStat;
+  band: Band;
+}
+
+export interface Breakdowns {
+  skills: SkillRow[];
+  coding_tests: { passed: number; total: number; percent: number | null } | null;
+  bloom: BreakdownRow[];
+  topics: BreakdownRow[];
+  question_types: BreakdownRow[];
+  difficulty: BreakdownRow[];
+  strengths: BreakdownRow[];
+  weaknesses: BreakdownRow[];
+}
+
+export interface TrendPoint {
+  exam_id: string;
+  name: string;
+  date: string;
+  percent: number | null;
+}
+
+export interface AssessmentRow {
+  exam_id: string;
+  name: string;
+  exam_type: AssessmentType;
+  date: string;
+  total_marks: number;
+  submissions: number;
+  average_percent: number | null;
+  highest_percent: number | null;
+  lowest_percent: number | null;
+  pending: number;
+}
+
+export interface StudentRow {
+  key: string;
+  name: string;
+  identifier: string | null;
+  assessments: number;
+  percent: number | null;
+  grade: GradeInfo | null;
+  band: Band;
+  skills: Record<SkillCategory, number | null>;
+  trend_delta: number | null;
+  pending: number;
+  last_submitted_at: string;
+}
+
+export interface ClassOverview {
+  summary: {
+    students: number;
+    assessments: number;
+    submissions: number;
+    average_percent: number | null;
+    median_percent: number | null;
+    highest_percent: number | null;
+    lowest_percent: number | null;
+    pass_rate: number | null;
+    pending_answers: number;
+  };
+  grade_distribution: { grade: string; label: string; min_percent: number; count: number }[];
+  score_histogram: { start: number; end: number; count: number }[];
+  breakdowns: Breakdowns;
+  assessments: AssessmentRow[];
+  trend: TrendPoint[];
+  students: StudentRow[];
+}
+
+export interface StudentHistoryRow {
+  exam_id: string;
+  name: string;
+  exam_type: AssessmentType;
+  date: string;
+  submitted_at: string;
+  awarded: number;
+  max: number;
+  percent: number | null;
+  grade: GradeInfo | null;
+  class_average_percent: number | null;
+  pending: number;
+}
+
+export interface StudentDetail {
+  key: string;
+  name: string;
+  identifier: string | null;
+  summary: {
+    assessments: number;
+    percent: number | null;
+    grade: GradeInfo | null;
+    band: Band;
+    rank: number | null;
+    class_size: number;
+    class_average_percent: number | null;
+    pending_answers: number;
+  };
+  history: StudentHistoryRow[];
+  breakdowns: Breakdowns;
+  trend: TrendPoint[];
+}
+
+function analyticsQuery(subjectId: string, examType?: AssessmentType | null) {
+  const params = new URLSearchParams({ subject_id: subjectId });
+  if (examType) params.set("exam_type", examType);
+  return params.toString();
+}
+
+export function fetchClassOverview(subjectId: string, examType?: AssessmentType | null) {
+  return apiFetch<ClassOverview>(`/analytics/overview?${analyticsQuery(subjectId, examType)}`);
+}
+
+export function fetchStudentDetail(subjectId: string, studentKey: string, examType?: AssessmentType | null) {
+  return apiFetch<StudentDetail>(
+    `/analytics/students/${encodeURIComponent(studentKey)}?${analyticsQuery(subjectId, examType)}`
+  );
 }
 
 // ---------- Display helpers ----------

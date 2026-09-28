@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import auth, exams, graph, questions, subjects, submissions
+from app.api import analytics, auth, exams, graph, patterns, questions, subjects, submissions
 from app.core.config import get_settings
 
 settings = get_settings()
@@ -25,6 +25,8 @@ app.include_router(graph.router)
 app.include_router(questions.router)
 app.include_router(exams.router)
 app.include_router(submissions.router)
+app.include_router(patterns.router)
+app.include_router(analytics.router)
 
 
 @app.get("/health")
