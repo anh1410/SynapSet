@@ -2,9 +2,10 @@ import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from app.api.deps import get_current_teacher, require_subject
+from app.core.attempt_store import get_attempt_store
 from app.core.exam_store import get_exam_store
 from app.core.pattern_store import get_pattern_store
 from app.core.question_bank import get_question_bank
@@ -13,6 +14,8 @@ from app.schemas.exam import AssessmentType, Exam, ExamStatus
 from app.schemas.question import Question
 from app.schemas.submission import GradedAnswer, Submission
 from app.schemas.teacher import Teacher
+from app.api.submissions import attempt_timing
+from app.schemas.public_exam import AttemptTiming
 
 router = APIRouter(prefix="/api/v1/exams", tags=["exams"], dependencies=[Depends(get_current_teacher)])
 
@@ -22,6 +25,16 @@ def _require_owner(exam_id: str, teacher: Teacher) -> Exam:
     if exam is None or exam.teacher_id != teacher.id:
         raise HTTPException(status_code=404, detail="Exam not found")
     return exam
+
+
+def _validated_exam(data: dict) -> Exam:
+    """Build an Exam through full validation (e.g. closing time after go-live),
+    turning a model error into a 422 the teacher UI can show."""
+    try:
+        return Exam.model_validate(data)
+    except ValidationError as exc:
+        message = "; ".join(e["msg"].removeprefix("Value error, ") for e in exc.errors())
+        raise HTTPException(status_code=422, detail=message) from exc
 
 
 def _check_pattern(pattern_id: str | None, subject_id: str, teacher: Teacher) -> None:
@@ -38,6 +51,8 @@ class CreateExamRequest(BaseModel):
     question_ids: list[str] = []
     total_marks: int = 0
     duration_minutes: int | None = None
+    go_live_at: datetime | None = None
+    closes_at: datetime | None = None
     exam_type: AssessmentType = "QUIZ"
     pattern_id: str | None = None
 
@@ -46,16 +61,21 @@ class CreateExamRequest(BaseModel):
 def create_exam(request: CreateExamRequest, teacher: Teacher = Depends(get_current_teacher)) -> Exam:
     require_subject(request.subject_id, teacher)
     _check_pattern(request.pattern_id, request.subject_id, teacher)
-    exam = Exam(
-        id=str(uuid.uuid4()),
-        teacher_id=teacher.id,
-        subject_id=request.subject_id,
-        name=request.name,
-        question_ids=request.question_ids,
-        total_marks=request.total_marks,
-        duration_minutes=request.duration_minutes,
-        exam_type=request.exam_type,
-        pattern_id=request.pattern_id,
+    exam = _validated_exam(
+        dict(
+            id=str(uuid.uuid4()),
+            teacher_id=teacher.id,
+            subject_id=request.subject_id,
+            name=request.name,
+            question_ids=request.question_ids,
+            total_marks=request.total_marks,
+            duration_minutes=request.duration_minutes,
+            go_live_at=request.go_live_at,
+            closes_at=request.closes_at,
+            status="scheduled" if request.go_live_at else "draft",
+            exam_type=request.exam_type,
+            pattern_id=request.pattern_id,
+        )
     )
     get_exam_store().add(exam)
     return exam
@@ -86,6 +106,7 @@ class UpdateExamRequest(BaseModel):
     total_marks: int | None = None
     duration_minutes: int | None = None
     go_live_at: datetime | None = None
+    closes_at: datetime | None = None
     password: str | None = None
     status: ExamStatus | None = None
     exam_type: AssessmentType | None = None
@@ -105,7 +126,7 @@ def update_exam(
     # otherwise the exam would silently stay stuck in the "draft" bucket forever.
     if "go_live_at" in update_data and update_data["go_live_at"] is not None and "status" not in update_data:
         update_data["status"] = "scheduled"
-    updated = exam.model_copy(update=update_data)
+    updated = _validated_exam({**exam.model_dump(exclude={"bucket", "closed_by"}), **update_data})
     get_exam_store().add(updated)
     return updated
 
@@ -163,3 +184,23 @@ def grade_submission_answer(
     submission.recompute_totals()
     store.add(submission)
     return submission
+
+
+class AttemptSummary(AttemptTiming):
+    student_name: str
+    student_identifier: str | None = None
+
+
+@router.get("/{exam_id}/attempts", response_model=list[AttemptSummary])
+def list_attempts(exam_id: str, teacher: Teacher = Depends(get_current_teacher)) -> list[AttemptSummary]:
+    """Who has started this exam, and whether each attempt is in progress,
+    submitted, or ran out of time."""
+    exam = _require_owner(exam_id, teacher)
+    return [
+        AttemptSummary(
+            **attempt_timing(a, exam).model_dump(),
+            student_name=a.student_name,
+            student_identifier=a.student_identifier,
+        )
+        for a in get_attempt_store().list_by_exam(exam_id)
+    ]

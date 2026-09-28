@@ -31,6 +31,7 @@ from app.schemas.exam import Exam
 from app.schemas.question import Question
 from app.schemas.skill import SkillCategory, difficulty_bucket, resolve_skill_category
 from app.schemas.submission import GradedAnswer, Submission
+from app.schemas.submission import student_key as _student_key
 
 # ---------- grading scale ----------
 
@@ -82,10 +83,7 @@ def band_for(percent: float | None, evidence: int) -> Band:
 
 
 def student_key(submission: Submission) -> str:
-    ident = (submission.student_identifier or "").strip()
-    if ident:
-        return "id:" + " ".join(ident.lower().split())
-    return "name:" + " ".join(submission.student_name.lower().split())
+    return _student_key(submission.student_name, submission.student_identifier)
 
 
 # ---------- response models ----------

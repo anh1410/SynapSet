@@ -178,9 +178,11 @@ export interface Exam {
   total_marks: number;
   duration_minutes: number | null;
   go_live_at: string | null;
+  closes_at: string | null;
   password: string | null;
   status: ExamStatus;
   bucket: ExamBucket;
+  closed_by: "teacher" | "schedule" | null;
   exam_type: AssessmentType;
   pattern_id: string | null;
   created_at: string;
@@ -382,6 +384,7 @@ export function updateExam(
     total_marks: number;
     duration_minutes: number | null;
     go_live_at: string | null;
+    closes_at: string | null;
     password: string | null;
     status: ExamStatus;
     exam_type: AssessmentType;
@@ -430,6 +433,22 @@ export interface Submission {
 
 export function getExamSubmissions(examId: string) {
   return apiFetch<Submission[]>(`/exams/${examId}/submissions`);
+}
+
+export interface AttemptSummary {
+  attempt_id: string;
+  student_name: string;
+  student_identifier: string | null;
+  started_at: string;
+  deadline: string | null;
+  remaining_seconds: number | null;
+  expired: boolean;
+  submitted: boolean;
+  submitted_at: string | null;
+}
+
+export function getExamAttempts(examId: string) {
+  return apiFetch<AttemptSummary[]>(`/exams/${examId}/attempts`);
 }
 
 export function gradeSubmissionAnswer(

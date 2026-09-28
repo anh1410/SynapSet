@@ -22,6 +22,37 @@ const bucketVariant: Record<ExamBucket, "success" | "accent" | "secondary" | "ou
   closed: "outline",
 };
 
+function relative(iso: string, now: number): string {
+  const mins = Math.round((new Date(iso).getTime() - now) / 60000);
+  const abs = Math.abs(mins);
+  const text = abs < 60 ? `${abs} min` : abs < 48 * 60 ? `${Math.round(abs / 60)} h` : `${Math.round(abs / 1440)} days`;
+  return mins >= 0 ? `in ${text}` : `${text} ago`;
+}
+
+const fmt = (iso: string) => new Date(iso).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+
+/** One line saying where the exam is in its schedule and what happens next. */
+function ScheduleLine({ exam, now }: { exam: Exam; now: number }) {
+  const parts: string[] = [];
+  if (exam.bucket === "draft") {
+    parts.push(exam.go_live_at ? `Go-live ${fmt(exam.go_live_at)} (not scheduled yet)` : "Not scheduled - set a go-live time to publish");
+  } else if (exam.bucket === "upcoming") {
+    parts.push(`Opens ${fmt(exam.go_live_at!)} (${relative(exam.go_live_at!, now)})`);
+    parts.push(exam.closes_at ? `closes ${fmt(exam.closes_at)}` : "no closing time");
+  } else if (exam.bucket === "live") {
+    parts.push(exam.closes_at ? `Closes ${fmt(exam.closes_at)} (${relative(exam.closes_at, now)})` : "Open until you close it");
+  } else if (exam.closed_by === "schedule" && exam.closes_at) {
+    parts.push(`Closed automatically ${fmt(exam.closes_at)}`);
+  } else {
+    parts.push("Closed by you");
+  }
+  return (
+    <span className="flex items-center gap-1">
+      <CalendarClock className="h-3 w-3" /> {parts.join(" · ")}
+    </span>
+  );
+}
+
 export function ExamsPage({
   onEdit,
   onViewResults,
@@ -35,6 +66,7 @@ export function ExamsPage({
   const [exams, setExams] = useState<Exam[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
     if (!activeSubjectId) return;
@@ -42,6 +74,13 @@ export function ExamsPage({
     listExams(activeSubjectId)
       .then(setExams)
       .finally(() => setLoading(false));
+    // Exams open and close on their own schedule; refresh quietly so the
+    // Upcoming / Live / Closed grouping doesn't go stale while the page is open.
+    const timer = setInterval(() => {
+      setNow(Date.now());
+      listExams(activeSubjectId).then(setExams).catch(() => {});
+    }, 60_000);
+    return () => clearInterval(timer);
   }, [activeSubjectId]);
 
   const handleClose = async (id: string) => {
@@ -123,14 +162,10 @@ export function ExamsPage({
                         </span>
                         {exam.duration_minutes != null && (
                           <span className="flex items-center gap-1">
-                            <Clock className="h-3 w-3" /> {exam.duration_minutes} min
+                            <Clock className="h-3 w-3" /> {exam.duration_minutes} min per student
                           </span>
                         )}
-                        {exam.go_live_at && (
-                          <span className="flex items-center gap-1">
-                            <CalendarClock className="h-3 w-3" /> {new Date(exam.go_live_at).toLocaleString()}
-                          </span>
-                        )}
+                        <ScheduleLine exam={exam} now={now} />
                       </div>
                     </div>
                     <div className="flex gap-2">

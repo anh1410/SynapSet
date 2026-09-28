@@ -74,6 +74,15 @@ function makeRow(topics: GraphNode[]): BuilderRow {
   };
 }
 
+/** ISO timestamp -> value for a <input type="datetime-local">, in the
+ *  browser's local time (slicing the ISO string would show UTC as local). */
+function toLocalInput(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 function rowFromQuestion(q: Question): BuilderRow {
   return {
     rowId: q.id,
@@ -103,6 +112,7 @@ export function ExamBuilderPage({
   const [examName, setExamName] = useState(`Weekly Quiz — ${new Date().toLocaleDateString()}`);
   const [duration, setDuration] = useState(30);
   const [goLiveAt, setGoLiveAt] = useState("");
+  const [closesAt, setClosesAt] = useState("");
   const [password, setPassword] = useState("");
   const [rows, setRows] = useState<BuilderRow[]>([]);
   const [generatingAll, setGeneratingAll] = useState(false);
@@ -145,7 +155,8 @@ export function ExamBuilderPage({
         setExamId(exam.id);
         setExamName(exam.name);
         setDuration(exam.duration_minutes ?? 30);
-        setGoLiveAt(exam.go_live_at ? exam.go_live_at.slice(0, 16) : "");
+        setGoLiveAt(toLocalInput(exam.go_live_at));
+        setClosesAt(toLocalInput(exam.closes_at));
         setPassword(exam.password ?? "");
         setPatternId(exam.pattern_id);
         setRows(questions.map(rowFromQuestion));
@@ -280,8 +291,20 @@ export function ExamBuilderPage({
   const anyError = rows.some((r) => r.status === "error");
   const anyPending = rows.some((r) => r.status === "pending");
 
+  // Mirrors the server rule (Exam._closes_after_go_live) so the teacher sees it before saving.
+  const scheduleError =
+    closesAt && !goLiveAt
+      ? "Set a go-live time before setting a closing time."
+      : closesAt && goLiveAt && new Date(closesAt) <= new Date(goLiveAt)
+        ? "Closing time must be after the go-live time."
+        : null;
+
   const handleSave = async () => {
     if (generatedRows.length === 0 || !activeSubjectId) return;
+    if (scheduleError) {
+      setSaveError(scheduleError);
+      return;
+    }
     setSaving(true);
     setSaveError(null);
     const typeInfo = { exam_type: pattern ? pattern.exam_type : ("QUIZ" as const), pattern_id: pattern ? pattern.id : null };
@@ -289,6 +312,7 @@ export function ExamBuilderPage({
       const question_ids = generatedRows.map((r) => r.question!.id);
       const scheduleUpdate = {
         go_live_at: goLiveAt ? new Date(goLiveAt).toISOString() : null,
+        closes_at: closesAt ? new Date(closesAt).toISOString() : null,
         password: password.trim() || null,
       };
 
@@ -312,7 +336,7 @@ export function ExamBuilderPage({
           ...typeInfo,
         });
         savedId = exam.id;
-        if (scheduleUpdate.go_live_at || scheduleUpdate.password) {
+        if (scheduleUpdate.go_live_at || scheduleUpdate.closes_at || scheduleUpdate.password) {
           await updateExam(savedId, scheduleUpdate);
         }
       }
@@ -396,16 +420,43 @@ export function ExamBuilderPage({
               <Clock className="h-3.5 w-3.5" /> Duration (min)
             </label>
             <Input value={duration} onChange={(e) => setDuration(Number(e.target.value))} type="number" />
+            <p className="text-[11px] text-muted-foreground">
+              Each student's timer starts when they begin and is enforced by the server.
+            </p>
           </div>
 
           <div className="space-y-3 rounded-lg border border-border p-3">
             <p className="flex items-center gap-1.5 text-[11px] font-semibold text-foreground">
               <CalendarClock className="h-3.5 w-3.5" /> Schedule (optional now)
             </p>
-            <div className="space-y-1">
-              <label className="text-[11px] font-medium text-muted-foreground">Go live at</label>
-              <Input type="datetime-local" value={goLiveAt} onChange={(e) => setGoLiveAt(e.target.value)} />
+            {/* Stacks in the narrow builder column on large screens, side by side on tablets. */}
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-1 2xl:grid-cols-2">
+              <div className="space-y-1">
+                <label className="text-[11px] font-medium text-muted-foreground">Go live at</label>
+                <Input type="datetime-local" value={goLiveAt} onChange={(e) => setGoLiveAt(e.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[11px] font-medium text-muted-foreground">Closes at (optional)</label>
+                <Input
+                  type="datetime-local"
+                  value={closesAt}
+                  min={goLiveAt || undefined}
+                  onChange={(e) => setClosesAt(e.target.value)}
+                  aria-invalid={Boolean(scheduleError)}
+                />
+              </div>
             </div>
+            {scheduleError ? (
+              <p className="flex items-center gap-1.5 text-[11px] text-destructive">
+                <AlertTriangle className="h-3 w-3" /> {scheduleError}
+              </p>
+            ) : (
+              <p className="text-[11px] text-muted-foreground">
+                {closesAt
+                  ? "No new attempts after the closing time; students already in progress must finish by then."
+                  : "Without a closing time the exam stays open until you close it."}
+              </p>
+            )}
             <div className="space-y-1">
               <label className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
                 <Lock className="h-3 w-3" /> Access password
@@ -553,6 +604,7 @@ export function ExamBuilderPage({
                   {goLiveAt && (
                     <p className="mt-1 text-xs text-muted-foreground">
                       Scheduled to go live {new Date(goLiveAt).toLocaleString()}
+                      {closesAt && !scheduleError && ` · closes ${new Date(closesAt).toLocaleString()}`}
                       {password && " · password protected"}
                     </p>
                   )}

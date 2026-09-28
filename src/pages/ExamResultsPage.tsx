@@ -11,8 +11,10 @@ import {
   QUESTION_TYPE_LABELS,
   SKILL_LABELS,
   getExam,
+  getExamAttempts,
   getExamSubmissions,
   gradeSubmissionAnswer,
+  type AttemptSummary,
   type Exam,
   type GradedAnswer,
   type Question,
@@ -98,10 +100,12 @@ export function ExamResultsPage({ examId, onBack }: { examId: string; onBack: ()
   const [exam, setExam] = useState<Exam | null>(null);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [submissions, setSubmissions] = useState<Submission[]>([]);
+  const [attempts, setAttempts] = useState<AttemptSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
 
   useEffect(() => {
+    getExamAttempts(examId).then(setAttempts).catch(() => setAttempts([]));
     Promise.all([getExam(examId), getExamSubmissions(examId)]).then(([detail, subs]) => {
       setExam(detail.exam);
       setQuestions(detail.questions);
@@ -111,6 +115,8 @@ export function ExamResultsPage({ examId, onBack }: { examId: string; onBack: ()
   }, [examId]);
 
   const questionText = (id: string) => questions.find((q) => q.id === id)?.text ?? id;
+  const inProgress = attempts.filter((a) => !a.submitted && !a.expired).length;
+  const timedOut = attempts.filter((a) => !a.submitted && a.expired).length;
   const replaceSubmission = (updated: Submission) =>
     setSubmissions((subs) => subs.map((s) => (s.id === updated.id ? updated : s)));
   const pendingAnswers = submissions.reduce(
@@ -158,6 +164,13 @@ export function ExamResultsPage({ examId, onBack }: { examId: string; onBack: ()
               <Users className="h-3.5 w-3.5" /> Submissions
             </p>
             <p className="mt-1 text-2xl font-semibold text-foreground">{submissions.length}</p>
+            {(inProgress > 0 || timedOut > 0) && (
+              <p className="mt-0.5 text-[11px] text-muted-foreground">
+                {inProgress > 0 && `${inProgress} in progress`}
+                {inProgress > 0 && timedOut > 0 && " · "}
+                {timedOut > 0 && `${timedOut} ran out of time without submitting`}
+              </p>
+            )}
           </CardContent>
         </Card>
         <Card>

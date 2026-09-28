@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     # Graded student submissions
     submission_store_path: str = str(BASE_DIR / "data" / "submissions.json")
 
+    # Students' exam attempts (server-recorded start times)
+    attempt_store_path: str = str(BASE_DIR / "data" / "attempts.json")
+    # Slack after an attempt's deadline for network latency before a submission is refused.
+    submission_grace_seconds: int = 30
+
     # Teacher accounts
     teacher_store_path: str = str(BASE_DIR / "data" / "teachers.json")
 

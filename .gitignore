@@ -18,6 +18,7 @@ exams.json
 exam_patterns.json
 teachers.json
 submissions.json
+attempts.json
 subjects.json
 .pytest_cache/
 *.egg-info/

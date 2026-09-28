@@ -6,6 +6,16 @@ from app.schemas.question import QuestionType
 from app.schemas.skill import SkillCategory
 
 
+def student_key(student_name: str, student_identifier: str | None) -> str:
+    """How a student is recognised across attempts, submissions and analytics:
+    their identifier (roll number) if given, else their name - normalised for
+    case and whitespace. Students have no accounts, so this is the identity."""
+    ident = (student_identifier or "").strip()
+    if ident:
+        return "id:" + " ".join(ident.lower().split())
+    return "name:" + " ".join(student_name.lower().split())
+
+
 class AnswerSubmission(BaseModel):
     question_id: str
     answer: str
@@ -46,6 +56,8 @@ class Submission(BaseModel):
     exam_id: str
     student_name: str
     student_identifier: str | None = None
+    attempt_id: str | None = None  # the timed attempt this submission closed, if any
+    started_at: datetime | None = None  # server-recorded attempt start
     answers: list[GradedAnswer] = Field(default_factory=list)
     total_marks_awarded: int
     total_max_marks: int
