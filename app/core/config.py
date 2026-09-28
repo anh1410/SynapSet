@@ -53,6 +53,14 @@ class Settings(BaseSettings):
     # Slack after an attempt's deadline for network latency before a submission is refused.
     submission_grace_seconds: int = 30
 
+    # Assessment-intelligence thresholds (all overridable via .env)
+    recent_use_days: int = 30  # "recently used" window for the question bank / assembler
+    frequent_use_count: int = 3  # used in at least this many published exams = "frequently used"
+    question_min_responses: int = 5  # graded responses before a per-question statistic is shown
+    calibration_min_questions: int = 4  # questions (each with enough responses) before comparing predicted vs actual difficulty
+    topic_min_questions: int = 3  # fewer bank questions than this on a topic = coverage risk
+    topic_risk_percent: float = 50.0  # class score below this on a topic (with enough answers) = performance risk
+
     # Teacher accounts
     teacher_store_path: str = str(BASE_DIR / "data" / "teachers.json")
 

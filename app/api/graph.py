@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from app.api.deps import get_current_teacher, require_subject
 from app.core.config import get_settings
 from app.core.document_store import get_document_store
-from app.core.graph_store import get_graph_store
+from app.core.graph_store import course_outcome_node_ids, get_graph_store
 from app.core.question_bank import get_question_bank
 from app.schemas.document import DocumentCategory, UploadedDocument
 from app.schemas.teacher import Teacher
@@ -126,6 +126,8 @@ class GraphNodeOut(BaseModel):
     coverage_pct: int = 0
     degree: int = 0
     neglected: bool = False
+    # Course-outcome nodes (targets of MAPS_TO) are shown in the graph but aren't topics.
+    is_course_outcome: bool = False
 
 
 class GraphEdgeOut(BaseModel):
@@ -147,11 +149,12 @@ def get_graph(subject_id: str, teacher: Teacher = Depends(get_current_teacher)) 
     graph = graph_store.graph
     bank = get_question_bank(subject_id)
 
+    cos = course_outcome_node_ids(graph)
     question_counts: dict[str, int] = {}
     for q in bank.list():
         for topic_id in q.topic_ids:
             question_counts[topic_id] = question_counts.get(topic_id, 0) + 1
-    max_count = max(question_counts.values(), default=0)
+    max_count = max((c for t, c in question_counts.items() if t not in cos), default=0)
 
     nodes = []
     for node_id, data in graph.nodes(data=True):
@@ -166,7 +169,8 @@ def get_graph(subject_id: str, teacher: Teacher = Depends(get_current_teacher)) 
                 question_count=count,
                 coverage_pct=coverage_pct,
                 degree=graph.degree(node_id),
-                neglected=coverage_pct < 40,
+                neglected=coverage_pct < 40 and node_id not in cos,
+                is_course_outcome=node_id in cos,
             )
         )
 

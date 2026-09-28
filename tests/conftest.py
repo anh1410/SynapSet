@@ -1,3 +1,5 @@
+from datetime import UTC, datetime, timedelta
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -114,3 +116,24 @@ def api_client(tmp_path, monkeypatch):
 
     for cached in cached_fns:
         cached.cache_clear()
+
+
+T0 = datetime(2026, 10, 1, 9, 0, tzinfo=UTC)
+
+
+class FakeClock:
+    """Controllable replacement for app.core.clock.utcnow, so time-based
+    behaviour (schedules, deadlines, "recently used") is tested without sleeping."""
+
+    def __init__(self):
+        self.now = T0
+
+    def advance(self, **delta):
+        self.now += timedelta(**delta)
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    fake = FakeClock()
+    monkeypatch.setattr("app.core.clock.utcnow", lambda: fake.now)
+    return fake

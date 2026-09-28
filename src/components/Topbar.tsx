@@ -3,7 +3,7 @@ import { Menu, Search, Bell, Network, HelpCircle, LogOut } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { SubjectSwitcher } from "@/components/SubjectSwitcher";
-import { fetchGraph, fetchQuestions, type GraphNode, type Question } from "@/lib/api";
+import { fetchGraph, fetchQuestions, topicNodes, type GraphNode, type Question } from "@/lib/api";
 import { useAuth } from "@/lib/AuthContext";
 import type { Page } from "@/App";
 
@@ -18,6 +18,7 @@ const titles: Record<Page, { title: string; subtitle: string }> = {
   answerKey: { title: "Answer Key", subtitle: "Every question and its correct answer" },
   patterns: { title: "Exam Patterns", subtitle: "MSE and SEE question paper patterns for this subject" },
   performance: { title: "Student Performance", subtitle: "Class and individual analysis across quizzes and exams" },
+  review: { title: "Paper Review", subtitle: "Final paper, blueprint and exports" },
 };
 
 function initialsFor(name: string): string {
@@ -51,7 +52,7 @@ export function Topbar({
   const ensureLoaded = () => {
     if (loaded || !activeSubjectId) return;
     Promise.all([fetchGraph(activeSubjectId), fetchQuestions(activeSubjectId)]).then(([g, qs]) => {
-      setTopics(g.nodes);
+      setTopics(topicNodes(g.nodes));
       setQuestions(qs);
       setLoaded(true);
     });

@@ -2,7 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.api.deps import get_current_teacher, require_subject
+from app.core.config import get_settings
+from app.core.exam_store import get_exam_store
 from app.core.graph_store import get_graph_store
+from app.core.submission_store import get_submission_store
 from app.core.question_bank import get_question_bank
 from app.schemas.bloom import BloomLevel
 from app.schemas.course_outcome import CourseOutcome
@@ -12,6 +15,8 @@ from app.schemas.grading import GradeResult
 from app.schemas.question import Question, QuestionType
 from app.schemas.teacher import Teacher
 from app.services.difficulty_scoring import score_difficulty
+from app.services.evidence import Evidence, question_evidence
+from app.services.question_usage import QuestionUsage, usage_by_question
 from app.services.duplicate_detection import find_duplicates
 from app.services.grading import AUTO_GRADABLE_TYPES, grade_answer
 from app.services.question_generation import generate_questions
@@ -89,6 +94,42 @@ def check_duplicates(request: CheckDuplicatesRequest, teacher: Teacher = Depends
     bank = get_question_bank(request.subject_id)
     matches = find_duplicates(request.question, bank.list(), threshold=request.threshold)
     return CheckDuplicatesResponse(matches=matches)
+
+
+class UsageThresholds(BaseModel):
+    recent_days: int
+    frequent_count: int
+
+
+class BankUsage(BaseModel):
+    thresholds: UsageThresholds
+    usage: dict[str, QuestionUsage]
+
+
+@router.get("/usage", response_model=BankUsage)
+def question_usage(subject_id: str, teacher: Teacher = Depends(get_current_teacher)) -> BankUsage:
+    """Per-question assessment history for the subject's bank: times used,
+    which exams, last used, and how students did on it."""
+    require_subject(subject_id, teacher)
+    settings = get_settings()
+    exams = [e for e in get_exam_store().list_by_subject(subject_id) if e.teacher_id == teacher.id]
+    subs = [s for e in exams for s in get_submission_store().list_by_exam(e.id)]
+    ids = [q.id for q in get_question_bank(subject_id).list()]
+    return BankUsage(
+        thresholds=UsageThresholds(recent_days=settings.recent_use_days, frequent_count=settings.frequent_use_count),
+        usage=usage_by_question(ids, exams, subs, settings.recent_use_days, settings.frequent_use_count),
+    )
+
+
+@router.get("/{question_id}/evidence", response_model=Evidence)
+def evidence(question_id: str, subject_id: str, teacher: Teacher = Depends(get_current_teacher)) -> Evidence:
+    """Where a question came from: the course-material passages and knowledge-graph
+    context it was generated from (or, for older questions, the closest material now)."""
+    require_subject(subject_id, teacher)
+    question = get_question_bank(subject_id).get(question_id)
+    if question is None:
+        raise HTTPException(status_code=404, detail="Question not found")
+    return question_evidence(question, get_graph_store(subject_id), subject_id)
 
 
 @router.get("", response_model=list[Question])

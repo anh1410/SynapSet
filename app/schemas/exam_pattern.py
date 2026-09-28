@@ -56,8 +56,18 @@ class PatternUnit(BaseModel):
 
 
 class CoRequirement(BaseModel):
+    """A course outcome the paper must assess: at least `min_questions`
+    questions tagged with it and/or at least `min_percent` of total marks."""
+
     co_code: str = Field(min_length=1)
-    min_questions: int = Field(ge=1)
+    min_questions: int = Field(default=0, ge=0)
+    min_percent: float | None = Field(default=None, ge=0, le=100)
+
+    @model_validator(mode="after")
+    def _has_a_target(self):
+        if not self.min_questions and not self.min_percent:
+            raise ValueError(f"{self.co_code}: set a minimum number of questions or a minimum % of marks")
+        return self
 
 
 class ExamPatternFields(BaseModel):

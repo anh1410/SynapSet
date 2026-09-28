@@ -1,13 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  AlertTriangle,
   ArrowLeft,
   Brain,
+  CheckCircle2,
+  CircleDashed,
   ClipboardCheck,
   Code2,
   GraduationCap,
   Lightbulb,
   Network,
   Percent,
+  ShieldAlert,
   Sigma,
   TrendingDown,
   TrendingUp,
@@ -37,7 +41,13 @@ import {
 import {
   ASSESSMENT_TYPE_LABELS,
   QUESTION_TYPE_LABELS,
+  BLOOM_LABELS,
+  fetchAssessmentAnalytics,
   fetchClassOverview,
+  fetchTopicRisk,
+  type AssessmentAnalytics,
+  type BloomLevel,
+  type TopicRisk,
   fetchStudentDetail,
   type AssessmentType,
   type BreakdownRow,
@@ -52,6 +62,11 @@ import { useAuth } from "@/lib/AuthContext";
 import { cn } from "@/lib/utils";
 
 const skillIcon: Record<SkillCategory, typeof Brain> = { conceptual: Lightbulb, reasoning: Brain, coding: Code2 };
+const skillTitle: Record<SkillCategory, string> = {
+  conceptual: "Conceptual understanding",
+  reasoning: "Reasoning & analysis",
+  coding: "Coding",
+};
 const skillHelp: Record<SkillCategory, string> = {
   conceptual: "Remember / Understand-level questions",
   reasoning: "Apply, Analyze, Evaluate, Create",
@@ -97,7 +112,7 @@ function SkillCards({ b }: { b: Breakdowns }) {
               <div className="flex items-start justify-between gap-2">
                 <div>
                   <p className="flex items-center gap-1.5 text-xs font-medium text-foreground">
-                    <Icon className="h-3.5 w-3.5 text-primary" /> {row?.label ?? skill}
+                    <Icon className="h-3.5 w-3.5 text-primary" /> {row?.label ?? skillTitle[skill]}
                   </p>
                   <p className="text-[11px] text-muted-foreground">{skillHelp[skill]}</p>
                 </div>
@@ -216,9 +231,178 @@ function BreakdownGrid({ b, who }: { b: Breakdowns; who: string }) {
   );
 }
 
+// ---------- weak-topic detection ----------
+
+const coverageLabel = { good: "Good", low: "Low", none: "No questions" } as const;
+
+function TopicRiskCard({ risk }: { risk: TopicRisk }) {
+  const perfCell = (r: TopicRisk["rows"][number]) => {
+    if (r.performance === "insufficient")
+      return (
+        <span className="inline-flex items-center gap-1 text-muted-foreground">
+          <CircleDashed className="h-3 w-3" /> {r.percent == null ? "No answers" : `${fmtPct(r.percent)} · too few answers`}
+        </span>
+      );
+    return (
+      <span className={cn("inline-flex items-center gap-1 font-medium", r.performance === "at_risk" ? "text-destructive" : "text-foreground")}>
+        {r.performance === "at_risk" ? <AlertTriangle className="h-3 w-3" /> : <CheckCircle2 className="h-3 w-3 text-success" />}
+        {fmtPct(r.percent)}
+      </span>
+    );
+  };
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <ShieldAlert className="h-4 w-4 text-primary" />
+          <CardTitle>Topic risk</CardTitle>
+        </div>
+        <CardDescription>
+          Coverage risk: fewer than {risk.min_questions} bank questions. Performance risk: class score below {risk.risk_percent}% with at
+          least {risk.min_answers} graded answers. Two separate signals — a topic can be well covered and still poorly understood.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="rounded-lg border border-border p-3">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Coverage risk ({risk.coverage_risks.length})</p>
+            <p className="mt-1 text-xs text-foreground">
+              {risk.coverage_risks.length ? risk.coverage_risks.map((r) => r.name).join(", ") : "Every topic has enough questions."}
+            </p>
+          </div>
+          <div className={cn("rounded-lg border p-3", risk.performance_risks.length ? "border-destructive/30 bg-destructive/[0.03]" : "border-border")}>
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Performance risk ({risk.performance_risks.length})</p>
+            <p className="mt-1 text-xs text-foreground">
+              {risk.performance_risks.length
+                ? risk.performance_risks.map((r) => `${r.name} (${fmtPct(r.percent)})`).join(", ")
+                : "No topic below the threshold with enough evidence."}
+            </p>
+          </div>
+        </div>
+        <div className="max-h-80 overflow-y-auto scrollbar-thin">
+          <DataTable
+            headers={["Topic", "Question coverage", "Bank questions", "Student performance", "Graded answers"]}
+            rows={risk.rows.map((r) => [
+              r.name,
+              <span key="c" className={cn(r.coverage === "good" ? "text-foreground" : "font-medium text-warning")}>
+                {coverageLabel[r.coverage]}
+              </span>,
+              r.question_count,
+              perfCell(r),
+              r.answers,
+            ])}
+          />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---------- assessment view ----------
+
+const flagLabel = { harder_than_predicted: "Harder than predicted", easier_than_predicted: "Easier than predicted" } as const;
+
+function AssessmentView({ data }: { data: AssessmentAnalytics }) {
+  const s = data.summary;
+  const p = data.participation;
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <StatTile
+          label="Submitted"
+          value={p.submitted}
+          sub={`${p.started} started${p.in_progress ? ` · ${p.in_progress} in progress` : ""}${p.timed_out ? ` · ${p.timed_out} timed out` : ""}${p.auto_submitted ? ` · ${p.auto_submitted} auto-submitted` : ""}`}
+          icon={Users}
+        />
+        <StatTile label="Average" value={fmtPct(s.average_percent, 1)} sub={`Median ${fmtPct(s.median_percent, 1)}`} icon={Percent} />
+        <StatTile label="Pass rate" value={fmtPct(s.pass_rate)} sub={`Range ${fmtPct(s.lowest_percent)} – ${fmtPct(s.highest_percent)}`} icon={Trophy} />
+        <StatTile
+          label="Awaiting grading"
+          value={s.pending_answers}
+          sub={s.pending_answers ? "Excluded from scores until graded" : "Everything is graded"}
+          icon={ClipboardCheck}
+          tone={s.pending_answers ? "warning" : undefined}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <ChartCard
+          title="Score distribution"
+          icon={Users}
+          table={<DataTable headers={["Range", "Students"]} rows={data.score_histogram.map((h) => [`${h.start}–${h.end}%`, h.count])} />}
+        >
+          <ColumnChart
+            data={data.score_histogram.map((h) => ({ key: String(h.start), label: `${h.start}`, value: h.count, tooltip: `${h.start}–${h.end}%: ${h.count}` }))}
+          />
+        </ChartCard>
+        <ChartCard
+          title="Grade distribution"
+          icon={GraduationCap}
+          table={<DataTable headers={["Grade", "Students"]} rows={data.grade_distribution.map((g) => [g.grade, g.count])} />}
+        >
+          <ColumnChart data={data.grade_distribution.map((g) => ({ key: g.grade, label: g.grade, value: g.count, tooltip: `${g.grade} (${g.label}): ${g.count}` }))} />
+        </ChartCard>
+      </div>
+
+      <BreakdownGrid b={data.breakdowns} who="students on this assessment" />
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Question-by-question</CardTitle>
+          <CardDescription>
+            Averages need at least {data.min_responses} graded responses before they're interpreted; flags compare the result with the difficulty
+            predicted when the question was generated.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p
+            className={cn(
+              "flex items-start gap-1.5 rounded-md p-2 text-xs",
+              data.calibration.status === "ok" ? "bg-secondary/50 text-foreground" : "bg-warning/[0.06] text-foreground"
+            )}
+          >
+            {data.calibration.status === "ok" ? <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 text-success" /> : <CircleDashed className="mt-0.5 h-3.5 w-3.5 text-warning" />}
+            <span>
+              <span className="font-medium">Predicted vs actual difficulty: </span>
+              {data.calibration.note}
+            </span>
+          </p>
+          <DataTable
+            headers={["#", "Question", "Bloom's", "Predicted", "Responses", "Average", "Result"]}
+            rows={data.questions.map((q) => [
+              q.position,
+              <span key="t" className="block max-w-[340px] truncate" title={q.text}>
+                {q.text}
+              </span>,
+              q.bloom_level ? BLOOM_LABELS[q.bloom_level as BloomLevel] : "—",
+              q.predicted_bucket ? `${q.predicted_bucket} (${q.predicted_difficulty?.toFixed(1)})` : "—",
+              q.pending ? `${q.responses} (+${q.pending} pending)` : q.responses,
+              q.sufficient ? fmtPct(q.average_percent) : q.average_percent == null ? "—" : `${fmtPct(q.average_percent)}*`,
+              !q.sufficient ? (
+                <span key="f" className="text-muted-foreground">Not enough data</span>
+              ) : q.calibration_flag ? (
+                <span key="f" className="inline-flex items-center gap-1 font-medium text-warning">
+                  <AlertTriangle className="h-3 w-3" /> {flagLabel[q.calibration_flag]}
+                </span>
+              ) : (
+                <span key="f" className="inline-flex items-center gap-1 text-success">
+                  <CheckCircle2 className="h-3 w-3" /> As predicted
+                </span>
+              ),
+            ])}
+          />
+          {data.questions.some((q) => !q.sufficient && q.average_percent != null) && (
+            <p className="text-[11px] text-muted-foreground">* Shown for reference only — fewer than {data.min_responses} graded responses.</p>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 // ---------- class view ----------
 
-function ClassView({ data, onOpenStudent }: { data: ClassOverview; onOpenStudent: (key: string) => void }) {
+function ClassView({ data, risk, onOpenStudent }: { data: ClassOverview; risk: TopicRisk | null; onOpenStudent: (key: string) => void }) {
   const s = data.summary;
   const b = data.breakdowns;
   return (
@@ -298,6 +482,8 @@ function ClassView({ data, onOpenStudent }: { data: ClassOverview; onOpenStudent
           series={[{ name: "Class average", color: SERIES_ACCENT, values: data.trend.map((t) => t.percent), emphasis: true }]}
         />
       </ChartCard>
+
+      {risk && <TopicRiskCard risk={risk} />}
 
       <BreakdownGrid b={b} who="the class" />
 
@@ -493,7 +679,10 @@ function StudentView({ data, onBack }: { data: StudentDetail; onBack: () => void
 
 export function PerformancePage() {
   const { activeSubjectId } = useAuth();
-  const [view, setView] = useState<"class" | "student">("class");
+  const [view, setView] = useState<"class" | "assessment" | "student">("class");
+  const [risk, setRisk] = useState<TopicRisk | null>(null);
+  const [assessmentId, setAssessmentId] = useState("");
+  const [assessment, setAssessment] = useState<AssessmentAnalytics | null>(null);
   const [examType, setExamType] = useState<AssessmentType | "">("");
   const [overview, setOverview] = useState<ClassOverview | null>(null);
   const [studentKey, setStudentKey] = useState<string>("");
@@ -509,12 +698,20 @@ export function PerformancePage() {
       .then(setOverview)
       .catch((e) => setError(e instanceof Error ? e.message : "Couldn't load performance data"))
       .finally(() => setLoading(false));
+    fetchTopicRisk(activeSubjectId, examType || null).then(setRisk).catch(() => setRisk(null));
   }, [activeSubjectId, examType]);
+
+  useEffect(() => {
+    if (view !== "assessment" || !assessmentId) return;
+    setAssessment(null);
+    fetchAssessmentAnalytics(assessmentId).then(setAssessment).catch(() => setAssessment(null));
+  }, [view, assessmentId]);
 
   // Reset the student picker when switching subject.
   useEffect(() => {
     setStudentKey("");
     setStudent(null);
+    setAssessmentId("");
     setView("class");
   }, [activeSubjectId]);
 
@@ -539,13 +736,24 @@ export function PerformancePage() {
     <div className="space-y-4">
       {/* One filter row scopes everything below it. */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <Tabs value={view} onValueChange={(v) => setView(v as "class" | "student")}>
+        <Tabs value={view} onValueChange={(v) => setView(v as "class" | "assessment" | "student")}>
           <TabsList>
             <TabsTrigger value="class">Class overview</TabsTrigger>
+            <TabsTrigger value="assessment">Assessment</TabsTrigger>
             <TabsTrigger value="student">Individual student</TabsTrigger>
           </TabsList>
         </Tabs>
         <div className="flex flex-wrap gap-2">
+          {view === "assessment" && (
+            <Select value={assessmentId} onChange={(e) => setAssessmentId(e.target.value)} className="w-64" aria-label="Assessment">
+              <option value="">Select an assessment…</option>
+              {(overview?.assessments ?? []).map((a) => (
+                <option key={a.exam_id} value={a.exam_id}>
+                  {ASSESSMENT_TYPE_LABELS[a.exam_type]} · {a.name}
+                </option>
+              ))}
+            </Select>
+          )}
           {view === "student" && (
             <Select value={studentKey} onChange={(e) => setStudentKey(e.target.value)} className="w-56" aria-label="Student">
               <option value="">Select a student…</option>
@@ -590,7 +798,15 @@ export function PerformancePage() {
       ) : (
         <div className={cn("transition-opacity", loading && "opacity-60")}>
           {view === "class" ? (
-            <ClassView data={overview} onOpenStudent={openStudent} />
+            <ClassView data={overview} risk={risk} onOpenStudent={openStudent} />
+          ) : view === "assessment" ? (
+            !assessmentId ? (
+              <EmptyState icon={ClipboardCheck} title="Pick an assessment" description="Choose a quiz or exam above to see its results question by question." />
+            ) : assessment && assessment.exam_id === assessmentId ? (
+              <AssessmentView data={assessment} />
+            ) : (
+              <Skeleton className="h-64 w-full" />
+            )
           ) : !studentKey ? (
             <EmptyState icon={Users} title="Pick a student" description="Choose a student above, or click one in the class overview's student table." />
           ) : student && student.key === studentKey ? (

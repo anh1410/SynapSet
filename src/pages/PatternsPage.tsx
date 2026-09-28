@@ -17,6 +17,7 @@ import {
   listPatternPresets,
   listPatterns,
   updatePattern,
+  topicNodes,
   type ExamPattern,
   type ExamPatternFields,
   type GraphNode,
@@ -52,7 +53,7 @@ export function PatternsPage({ onBuildExam }: { onBuildExam: (patternId: string)
     if (!activeSubjectId) return;
     setLoading(true);
     setEditor({ mode: "closed" });
-    Promise.all([listPatterns(activeSubjectId).then(setPatterns), fetchGraph(activeSubjectId).then((g) => setTopics(g.nodes))]).finally(() =>
+    Promise.all([listPatterns(activeSubjectId).then(setPatterns), fetchGraph(activeSubjectId).then((g) => setTopics(topicNodes(g.nodes)))]).finally(() =>
       setLoading(false)
     );
   }, [activeSubjectId]);

@@ -7,7 +7,7 @@ import { Progress } from "@/components/ui/progress";
 import { Tooltip } from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
-import { dedupeTopics, fetchGraph, type GraphEdge, type GraphNode } from "@/lib/api";
+import { dedupeTopics, fetchGraph, topicNodes, type GraphEdge, type GraphNode } from "@/lib/api";
 import { useAuth } from "@/lib/AuthContext";
 import { cn } from "@/lib/utils";
 
@@ -169,7 +169,7 @@ export function AnalysisPage() {
             <CardDescription>Question bank coverage relative to the best-covered topic</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4 max-h-[27rem] overflow-y-auto scrollbar-thin pr-1">
-            {[...nodes]
+            {topicNodes(nodes)
               .sort((a, b) => a.coverage_pct - b.coverage_pct)
               .map((t) => (
                 <div
@@ -218,7 +218,7 @@ export function AnalysisPage() {
                 </tr>
               </thead>
               <tbody>
-                {nodes.map((t) => (
+                {topicNodes(nodes).map((t) => (
                   <tr key={t.id} className="border-b border-border last:border-0 transition-colors duration-150 hover:bg-secondary/30">
                     <td className="px-6 py-3 font-medium text-foreground">{t.name}</td>
                     <td className="px-4 py-3 text-muted-foreground">{t.degree}</td>

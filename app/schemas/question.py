@@ -23,6 +23,27 @@ class CodeTestCase(BaseModel):
     expected_output: str
 
 
+class SourceChunk(BaseModel):
+    """A course-material passage the generator was grounded on."""
+
+    source_document: str | None = None
+    chunk_index: int | None = None
+    excerpt: str
+    relevance: float | None = None  # 1 - cosine distance from the retrieval query
+
+
+class QuestionProvenance(BaseModel):
+    """Recorded at generation time so a generated question is traceable: which
+    topic it was asked for, which passages were retrieved as grounding, and
+    which knowledge-graph relations were given to the model."""
+
+    requested_topic: str
+    retrieved_chunks: list[SourceChunk] = Field(default_factory=list)
+    graph_relations: list[str] = Field(default_factory=list)  # e.g. "Stacks --[PREREQUISITE_OF]--> Recursion"
+    model: str | None = None
+    generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
 class Question(BaseModel):
     id: str
     text: str
@@ -47,6 +68,9 @@ class Question(BaseModel):
     # Optional teacher override; when unset the category is derived from
     # question_type + bloom_level (see app.schemas.skill).
     skill_category: SkillCategory | None = None
+
+    provenance: QuestionProvenance | None = None  # set for questions generated after provenance was recorded
+    derived_from: str | None = None  # id of the question this one was copied from (e.g. marks edited for one paper)
 
     source_document: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

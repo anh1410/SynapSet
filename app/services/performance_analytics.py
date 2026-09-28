@@ -17,6 +17,7 @@ when no identifier was given. Only submissions to exams in the requested
 subject are ever read, so a teacher can't see students from other subjects.
 """
 
+import math
 import re
 import statistics
 from collections import defaultdict
@@ -338,7 +339,7 @@ def _rows(groups: dict[str, list[AnswerFact]], label: Callable[[str], str], orde
     return rows
 
 
-def breakdowns(facts: list[AnswerFact], topic_names: dict[str, str]) -> Breakdowns:
+def breakdowns(facts: list[AnswerFact], topic_names: dict[str, str], course_outcomes: frozenset[str] = frozenset()) -> Breakdowns:
     skill_groups = _group(facts, lambda f: [f.skill.value] if f.skill else [])
     skills = []
     for skill in SkillCategory:
@@ -360,7 +361,11 @@ def breakdowns(facts: list[AnswerFact], topic_names: dict[str, str]) -> Breakdow
         lambda k: BloomLevel(int(k)).name.title(),
         order=[str(b.value) for b in BloomLevel],
     )
-    topics = _rows(_group(facts, lambda f: f.topic_ids), lambda k: topic_names.get(k, k.replace("_", " ").title()))
+    # Course-outcome nodes are tags, not topics - COs aren't strengths or weaknesses.
+    topics = _rows(
+        _group(facts, lambda f: [t for t in f.topic_ids if t not in course_outcomes]),
+        lambda k: topic_names.get(k, k.replace("_", " ").title()),
+    )
     topics.sort(key=lambda r: (r.score.percent is None, -(r.score.percent or 0)))
     qtypes = _rows(_group(facts, lambda f: [f.question_type]), lambda k: k.replace("_", " ").title())
     difficulty = _rows(
@@ -481,7 +486,11 @@ def _assessment_rows(ds: _Dataset) -> list[AssessmentRow]:
 
 
 def class_overview(
-    exams: list[Exam], submissions: list[Submission], bank: dict[str, Question], topic_names: dict[str, str]
+    exams: list[Exam],
+    submissions: list[Submission],
+    bank: dict[str, Question],
+    topic_names: dict[str, str],
+    course_outcomes: frozenset[str] = frozenset(),
 ) -> ClassOverview:
     ds = _dataset(exams, submissions, bank)
     students = _student_rows(ds)
@@ -512,7 +521,7 @@ def class_overview(
             GradeCount(grade=g, label=label, min_percent=t, count=grade_counts[g]) for t, g, label in GRADE_SCALE
         ],
         score_histogram=bins,
-        breakdowns=breakdowns(ds.facts, topic_names),
+        breakdowns=breakdowns(ds.facts, topic_names, course_outcomes),
         assessments=assessments,
         trend=[TrendPoint(exam_id=a.exam_id, name=a.name, date=a.date, percent=a.average_percent) for a in assessments],
         students=students,
@@ -525,6 +534,7 @@ def student_detail(
     submissions: list[Submission],
     bank: dict[str, Question],
     topic_names: dict[str, str],
+    course_outcomes: frozenset[str] = frozenset(),
 ) -> StudentDetail | None:
     ds = _dataset(exams, submissions, bank)
     mine = sorted((s for s in ds.subs if student_key(s) == key), key=lambda s: ds.exam_dates[s.exam_id])
@@ -576,6 +586,240 @@ def student_detail(
             pending_answers=me.pending,
         ),
         history=history,
-        breakdowns=breakdowns(facts, topic_names),
+        breakdowns=breakdowns(facts, topic_names, course_outcomes),
         trend=[TrendPoint(exam_id=h.exam_id, name=h.name, date=h.date, percent=h.percent) for h in history],
+    )
+
+
+# ---------- assessment-level analytics ----------
+
+
+class QuestionStat(BaseModel):
+    question_id: str
+    position: int
+    text: str
+    question_type: str
+    bloom_level: int | None
+    skill: str | None
+    marks: int
+    topics: list[str]
+    predicted_difficulty: float | None  # difficulty score assigned at generation (1-10)
+    predicted_bucket: str | None
+    responses: int  # graded answers
+    pending: int
+    average_percent: float | None
+    sufficient: bool  # enough responses to interpret average_percent
+    # Only set when `sufficient`: the question behaved clearly differently from its predicted difficulty.
+    calibration_flag: str | None
+
+
+class DifficultyCalibration(BaseModel):
+    status: str  # "ok" or "insufficient"
+    questions_used: int
+    spearman: float | None  # rank correlation of predicted difficulty vs share of marks lost
+    note: str
+
+
+class Participation(BaseModel):
+    started: int
+    submitted: int
+    in_progress: int
+    timed_out: int
+    auto_submitted: int
+
+
+class AssessmentAnalytics(BaseModel):
+    exam_id: str
+    name: str
+    exam_type: str
+    date: datetime
+    total_marks: int
+    participation: Participation
+    summary: ClassSummary
+    grade_distribution: list[GradeCount]
+    score_histogram: list[HistogramBin]
+    breakdowns: Breakdowns
+    questions: list[QuestionStat]
+    calibration: DifficultyCalibration
+    min_responses: int
+
+
+# Actual share of marks expected for each predicted difficulty band.
+_EXPECTED_BAND = {"easy": (60.0, 100.0), "medium": (35.0, 80.0), "hard": (0.0, 55.0)}
+
+
+def _calibration_flag(bucket: str | None, percent: float) -> str | None:
+    if bucket not in _EXPECTED_BAND:
+        return None
+    lo, hi = _EXPECTED_BAND[bucket]
+    if percent < lo:
+        return "harder_than_predicted"
+    if percent > hi:
+        return "easier_than_predicted"
+    return None
+
+
+def _spearman(xs: list[float], ys: list[float]) -> float | None:
+    from scipy.stats import spearmanr
+
+    rho = spearmanr(xs, ys).statistic
+    return None if rho is None or math.isnan(rho) else round(float(rho), 2)
+
+
+def assessment_analytics(
+    exam: Exam,
+    submissions: list[Submission],
+    bank: dict[str, Question],
+    topic_names: dict[str, str],
+    attempts: list,
+    min_responses: int,
+    min_calibration_questions: int,
+    course_outcomes: frozenset[str] = frozenset(),
+) -> AssessmentAnalytics:
+    overview = class_overview([exam], submissions, bank, topic_names, course_outcomes)
+    subs = [s for s in latest_attempts(submissions) if s.exam_id == exam.id]
+
+    questions = []
+    for position, qid in enumerate(exam.question_ids, start=1):
+        answers = [a for s in subs for a in s.answers if a.question_id == qid]
+        q = bank.get(qid)
+        facts = [_fact("", exam.id, a, q) for a in answers]
+        score = _score(facts)
+        predicted = next((a.difficulty_score for a in answers if a.difficulty_score is not None), None)
+        if predicted is None and q is not None:
+            predicted = q.difficulty_score
+        bucket = difficulty_bucket(predicted) if predicted is not None else None
+        sufficient = score.answers >= min_responses and score.percent is not None
+        topic_ids = (answers[0].topic_ids if answers and answers[0].topic_ids is not None else (q.topic_ids if q else []))
+        bloom = answers[0].bloom_level if answers and answers[0].bloom_level is not None else (int(q.bloom_level) if q else None)
+        qtype = answers[0].question_type.value if answers else (q.question_type.value if q else "unknown")
+        skill = facts[0].skill.value if facts and facts[0].skill else (q.effective_skill_category.value if q else None)
+        questions.append(
+            QuestionStat(
+                question_id=qid,
+                position=position,
+                text=(q.text if q else "(question no longer in the bank)")[:180],
+                question_type=qtype,
+                bloom_level=bloom,
+                skill=skill,
+                marks=q.marks if q else (answers[0].max_marks if answers else 0),
+                topics=[topic_names.get(t, t) for t in topic_ids if t not in course_outcomes],
+                predicted_difficulty=predicted,
+                predicted_bucket=bucket,
+                responses=score.answers,
+                pending=score.pending,
+                average_percent=score.percent,
+                sufficient=sufficient,
+                calibration_flag=_calibration_flag(bucket, score.percent) if sufficient else None,
+            )
+        )
+
+    usable = [q for q in questions if q.sufficient and q.predicted_difficulty is not None]
+    if len(usable) < min_calibration_questions:
+        calibration = DifficultyCalibration(
+            status="insufficient",
+            questions_used=len(usable),
+            spearman=None,
+            note=(
+                f"Not enough data: needs at least {min_calibration_questions} questions with "
+                f"{min_responses}+ graded responses each (have {len(usable)})."
+            ),
+        )
+    else:
+        rho = _spearman([q.predicted_difficulty for q in usable], [100 - q.average_percent for q in usable])
+        if rho is None:
+            calibration = DifficultyCalibration(status="insufficient", questions_used=len(usable), spearman=None,
+                                                note="Not enough variation in scores or predictions to compare.")
+        else:
+            strength = "strong" if abs(rho) >= 0.7 else "moderate" if abs(rho) >= 0.4 else "weak"
+            direction = "agree with" if rho > 0 else "run opposite to"
+            calibration = DifficultyCalibration(
+                status="ok", questions_used=len(usable), spearman=rho,
+                note=f"Predicted difficulty and actual results {direction} each other ({strength}, rank correlation {rho:+.2f}).",
+            )
+
+    now_attempts = [a for a in attempts if a.exam_id == exam.id]
+    return AssessmentAnalytics(
+        exam_id=exam.id,
+        name=exam.name,
+        exam_type=exam.exam_type,
+        date=_exam_date(exam, subs),
+        total_marks=exam.total_marks,
+        participation=Participation(
+            started=len(now_attempts),
+            submitted=len(subs),
+            in_progress=sum(1 for a in now_attempts if a.status == "in_progress"),
+            timed_out=sum(1 for a in now_attempts if a.status == "timed_out"),
+            auto_submitted=sum(1 for s in subs if s.auto_submitted),
+        ),
+        summary=overview.summary,
+        grade_distribution=overview.grade_distribution,
+        score_histogram=overview.score_histogram,
+        breakdowns=overview.breakdowns,
+        questions=questions,
+        calibration=calibration,
+        min_responses=min_responses,
+    )
+
+
+# ---------- weak-topic detection ----------
+
+
+class TopicRiskRow(BaseModel):
+    topic_id: str
+    name: str
+    question_count: int
+    coverage: str  # "good" | "low" | "none"
+    answers: int  # graded answers on this topic
+    percent: float | None
+    performance: str  # "good" | "at_risk" | "insufficient"
+
+
+class TopicRisk(BaseModel):
+    min_questions: int
+    risk_percent: float
+    min_answers: int
+    rows: list[TopicRiskRow]
+    coverage_risks: list[TopicRiskRow]
+    performance_risks: list[TopicRiskRow]
+
+
+def topic_risk(
+    topics: dict[str, str],  # graph topic id -> name
+    question_counts: dict[str, int],
+    breakdown_topics: list[BreakdownRow],
+    min_questions: int,
+    risk_percent: float,
+) -> TopicRisk:
+    """Two separate signals per topic: *coverage risk* (the bank has too few
+    questions on it) and *performance risk* (students score poorly on it, with
+    enough graded answers to say so)."""
+    perf = {r.key: r for r in breakdown_topics}
+    ids = list(topics) + [k for k in perf if k not in topics]
+    rows = []
+    for tid in ids:
+        n = question_counts.get(tid, 0)
+        coverage = "none" if n == 0 else "low" if n < min_questions else "good"
+        r = perf.get(tid)
+        answers = r.score.answers if r else 0
+        percent = r.score.percent if r else None
+        if percent is None or answers < MIN_EVIDENCE:
+            performance = "insufficient"
+        elif percent < risk_percent:
+            performance = "at_risk"
+        else:
+            performance = "good"
+        rows.append(TopicRiskRow(
+            topic_id=tid, name=topics.get(tid) or (r.label if r else tid), question_count=n,
+            coverage=coverage, answers=answers, percent=percent, performance=performance,
+        ))
+    severity = {"at_risk": 0, "good": 2, "insufficient": 1}
+    rows.sort(key=lambda r: (severity[r.performance], {"none": 0, "low": 1, "good": 2}[r.coverage], r.name.lower()))
+    return TopicRisk(
+        min_questions=min_questions,
+        risk_percent=risk_percent,
+        min_answers=MIN_EVIDENCE,
+        rows=rows,
+        coverage_risks=[r for r in rows if r.coverage != "good"],
+        performance_risks=sorted((r for r in rows if r.performance == "at_risk"), key=lambda r: r.percent or 0),
     )

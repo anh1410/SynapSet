@@ -3,29 +3,11 @@ enforcement, student-facing timing info, and teacher access control.
 
 Time is controlled through app.core.clock so the tests never sleep."""
 
-from datetime import UTC, datetime, timedelta
-
-import pytest
+from datetime import datetime, timedelta
 
 from app.schemas.bloom import BloomLevel
 from app.schemas.question import Question, QuestionType
-
-T0 = datetime(2026, 10, 1, 9, 0, tzinfo=UTC)
-
-
-class FakeClock:
-    def __init__(self):
-        self.now = T0
-
-    def advance(self, **delta):
-        self.now += timedelta(**delta)
-
-
-@pytest.fixture
-def clock(monkeypatch):
-    fake = FakeClock()
-    monkeypatch.setattr("app.core.clock.utcnow", lambda: fake.now)
-    return fake
+from tests.conftest import T0
 
 
 def _iso(dt: datetime) -> str:

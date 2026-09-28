@@ -224,6 +224,11 @@ export function ExamResultsPage({ examId, onBack }: { examId: string; onBack: ()
                         </p>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
+                        {sub.auto_submitted && (
+                          <Badge variant="outline" title="Time ran out or the exam closed before the student submitted; their autosaved answers were submitted for them.">
+                            Auto-submitted
+                          </Badge>
+                        )}
                         {!sub.fully_auto_graded && <Badge variant="warning">Needs review</Badge>}
                         <Badge variant={pct >= 70 ? "success" : pct >= 40 ? "warning" : "destructive"}>
                           {sub.total_marks_awarded} / {sub.total_max_marks} ({pct}%)

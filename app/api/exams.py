@@ -16,6 +16,7 @@ from app.schemas.submission import GradedAnswer, Submission
 from app.schemas.teacher import Teacher
 from app.api.submissions import attempt_timing
 from app.schemas.public_exam import AttemptTiming
+from app.services.exam_attempts import attempt_status, finalize_ended_attempts
 
 router = APIRouter(prefix="/api/v1/exams", tags=["exams"], dependencies=[Depends(get_current_teacher)])
 
@@ -119,6 +120,12 @@ def update_exam(
 ) -> Exam:
     exam = _require_owner(exam_id, teacher)
     update_data = request.model_dump(exclude_unset=True)
+    changes_paper = "question_ids" in update_data and update_data["question_ids"] != exam.question_ids
+    if changes_paper and get_submission_store().list_by_exam(exam_id):
+        raise HTTPException(
+            status_code=409,
+            detail="Students have already submitted this exam, so its questions can't be changed - results would no longer match the paper.",
+        )
     if update_data.get("exam_type") is None:
         update_data.pop("exam_type", None)
     _check_pattern(update_data.get("pattern_id"), exam.subject_id, teacher)
@@ -140,7 +147,8 @@ def delete_exam(exam_id: str, teacher: Teacher = Depends(get_current_teacher)) -
 
 @router.get("/{exam_id}/submissions", response_model=list[Submission])
 def list_submissions(exam_id: str, teacher: Teacher = Depends(get_current_teacher)) -> list[Submission]:
-    _require_owner(exam_id, teacher)
+    exam = _require_owner(exam_id, teacher)
+    finalize_ended_attempts(exam)
     return get_submission_store().list_by_exam(exam_id)
 
 
@@ -189,6 +197,9 @@ def grade_submission_answer(
 class AttemptSummary(AttemptTiming):
     student_name: str
     student_identifier: str | None = None
+    status: str  # in_progress | submitted | timed_out | closed
+    saved_answer_count: int
+    last_saved_at: datetime | None = None
 
 
 @router.get("/{exam_id}/attempts", response_model=list[AttemptSummary])
@@ -196,11 +207,15 @@ def list_attempts(exam_id: str, teacher: Teacher = Depends(get_current_teacher))
     """Who has started this exam, and whether each attempt is in progress,
     submitted, or ran out of time."""
     exam = _require_owner(exam_id, teacher)
+    finalize_ended_attempts(exam)
     return [
         AttemptSummary(
             **attempt_timing(a, exam).model_dump(),
             student_name=a.student_name,
             student_identifier=a.student_identifier,
+            status=attempt_status(a, exam),
+            saved_answer_count=len(a.saved_answers),
+            last_saved_at=a.last_saved_at,
         )
         for a in get_attempt_store().list_by_exam(exam_id)
     ]

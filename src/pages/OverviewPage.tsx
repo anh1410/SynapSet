@@ -15,6 +15,7 @@ import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   fetchGraph,
+  topicNodes,
   fetchDocuments,
   fetchQuestions,
   listExams,
@@ -46,7 +47,7 @@ export function OverviewPage({ onNavigate }: { onNavigate: (p: Page) => void }) 
     if (!activeSubjectId) return;
     setLoading(true);
     Promise.all([
-      fetchGraph(activeSubjectId).then((g) => setNodes(g.nodes)),
+      fetchGraph(activeSubjectId).then((g) => setNodes(topicNodes(g.nodes))),
       fetchDocuments(activeSubjectId).then(setDocuments),
       fetchQuestions(activeSubjectId).then((qs) => setQuestionCount(qs.length)),
       listExams(activeSubjectId).then(setExams),

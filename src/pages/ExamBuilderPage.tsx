@@ -31,6 +31,7 @@ import {
   checkAgainstPattern,
   effectiveSkill,
   listPatterns,
+  topicNodes,
   type ComplianceReport,
   type ExamPattern,
   QUESTION_TYPE_LABELS,
@@ -124,6 +125,7 @@ export function ExamBuilderPage({
   const [report, setReport] = useState<ComplianceReport | null>(null);
   const [assembling, setAssembling] = useState(false);
   const [generateMissing, setGenerateMissing] = useState(false);
+  const [avoidRecent, setAvoidRecent] = useState(true);
   const [assembleNote, setAssembleNote] = useState<{ ok: boolean; lines: string[] } | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -144,7 +146,7 @@ export function ExamBuilderPage({
 
   useEffect(() => {
     if (!activeSubjectId) return;
-    fetchGraph(activeSubjectId).then((g) => setTopics(g.nodes));
+    fetchGraph(activeSubjectId).then((g) => setTopics(topicNodes(g.nodes)));
   }, [activeSubjectId]);
 
   useEffect(() => {
@@ -257,7 +259,7 @@ export function ExamBuilderPage({
     setAssembling(true);
     setAssembleNote(null);
     try {
-      const { assembly, generated } = await assembleFromPattern(patternId, generateMissing);
+      const { assembly, generated, excluded_recent } = await assembleFromPattern(patternId, generateMissing, 8, avoidRecent ? 30 : null);
       const bank = await fetchQuestions(activeSubjectId);
       const byId = new Map(bank.map((q) => [q.id, q]));
       const picked = assembly.question_ids.map((id) => byId.get(id)).filter((q): q is Question => Boolean(q));
@@ -271,6 +273,9 @@ export function ExamBuilderPage({
           `The question bank can't satisfy this pattern yet (blocked by ${assembly.blocking.map((b) => CONSTRAINT_LABELS[b]).join(", ")}). ` +
             `This draft relaxes ${assembly.relaxed.map((b) => CONSTRAINT_LABELS[b]).join(", ")}.`
         );
+      }
+      if (excluded_recent) {
+        lines.push(`Left out ${excluded_recent} question${excluded_recent === 1 ? "" : "s"} used in the last 30 days.`);
       }
       if (generated.length) {
         const made = generated.filter((g) => g.question_id).length;
@@ -383,6 +388,10 @@ export function ExamBuilderPage({
             {patterns.length === 0 && <p className="text-[11px] text-muted-foreground">Create MSE/SEE patterns under Exam Patterns.</p>}
             {pattern && (
               <>
+                <label className="flex items-start gap-2 text-[11px] text-muted-foreground">
+                  <Checkbox checked={avoidRecent} onCheckedChange={setAvoidRecent} className="mt-0.5" />
+                  <span>Avoid questions used in an exam in the last 30 days</span>
+                </label>
                 <label className="flex items-start gap-2 text-[11px] text-muted-foreground">
                   <Checkbox checked={generateMissing} onCheckedChange={setGenerateMissing} className="mt-0.5" />
                   <span>Generate missing questions with AI when the bank can't fill a section (Graph-RAG, saved to the bank)</span>

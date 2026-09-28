@@ -49,6 +49,12 @@ class KnowledgeGraphStore:
         return nx.pagerank(self.graph) if self.graph.number_of_nodes() else {}
 
 
+def course_outcome_node_ids(graph: nx.DiGraph) -> set[str]:
+    """Nodes that are course outcomes rather than teachable topics: extraction
+    adds a node for each CO that a topic MAPS_TO."""
+    return {v for _, v, d in graph.edges(data=True) if d.get("relation_type") == "MAPS_TO"}
+
+
 def get_neo4j_driver():
     """Return a Neo4j driver if credentials are configured, else None."""
     settings = get_settings()

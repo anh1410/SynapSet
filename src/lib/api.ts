@@ -81,6 +81,7 @@ export interface Question {
   embedding_id: string | null;
   is_duplicate_of: string | null;
   skill_category?: SkillCategory | null;
+  derived_from?: string | null;
   source_document: string | null;
   created_at: string;
 }
@@ -116,6 +117,13 @@ export interface GraphNode {
   coverage_pct: number;
   degree: number;
   neglected: boolean;
+  is_course_outcome?: boolean;
+}
+
+/** Graph nodes that are teachable topics - course-outcome nodes (CO1, CO2...)
+ *  are drawn in the knowledge graph but aren't topics to pick, cover, or analyse. */
+export function topicNodes(nodes: GraphNode[]): GraphNode[] {
+  return nodes.filter((n) => !n.is_course_outcome);
 }
 
 export interface GraphEdge {
@@ -429,6 +437,9 @@ export interface Submission {
   total_max_marks: number;
   fully_auto_graded: boolean;
   submitted_at: string;
+  attempt_id?: string | null;
+  started_at?: string | null;
+  auto_submitted?: boolean;
 }
 
 export function getExamSubmissions(examId: string) {
@@ -445,6 +456,9 @@ export interface AttemptSummary {
   expired: boolean;
   submitted: boolean;
   submitted_at: string | null;
+  status: "in_progress" | "submitted" | "timed_out" | "closed";
+  saved_answer_count: number;
+  last_saved_at: string | null;
 }
 
 export function getExamAttempts(examId: string) {
@@ -497,7 +511,7 @@ export interface ExamPatternFields {
   bloom_distribution: { bloom_level: BloomLevel; percent: number }[];
   difficulty_distribution: { difficulty: DifficultyLevel; percent: number }[];
   units: PatternUnit[];
-  co_requirements: { co_code: string; min_questions: number }[];
+  co_requirements: { co_code: string; min_questions: number; min_percent?: number | null }[];
   tolerance_percent: number;
 }
 
@@ -536,7 +550,9 @@ export interface ComplianceReport {
   bloom: DistributionRow[];
   difficulty: DistributionRow[];
   units: DistributionRow[];
-  course_outcomes: { co_code: string; min_questions: number; actual: number; met: boolean }[];
+  course_outcomes: CoRow[];
+  question_types?: DistributionRow[];
+  skills?: DistributionRow[];
   topics_covered: number;
   unassigned_question_ids: string[];
   issues: string[];
@@ -553,6 +569,7 @@ export const CONSTRAINT_LABELS: Record<ConstraintFamily, string> = {
 };
 
 export interface AssembleResponse {
+  excluded_recent?: number;
   assembly: {
     status: "optimal" | "feasible" | "infeasible";
     satisfied: boolean;
@@ -606,10 +623,10 @@ export function importPatternDocument(subjectId: string, file: File, examTypeHin
   return apiFetch<PatternImportResult>("/patterns/import", { method: "POST", body: form });
 }
 
-export function assembleFromPattern(id: string, generateMissing: boolean, maxGenerate = 8) {
+export function assembleFromPattern(id: string, generateMissing: boolean, maxGenerate = 8, avoidRecentDays?: number | null) {
   return apiFetch<AssembleResponse>(`/patterns/${id}/assemble`, {
     method: "POST",
-    body: JSON.stringify({ generate_missing: generateMissing, max_generate: maxGenerate }),
+    body: JSON.stringify({ generate_missing: generateMissing, max_generate: maxGenerate, avoid_recent_days: avoidRecentDays ?? null }),
   });
 }
 
@@ -806,4 +823,306 @@ export function timeAgo(iso: string): string {
   if (days === 1) return "Yesterday";
   if (days < 7) return `${days} days ago`;
   return new Date(iso).toLocaleDateString();
+}
+
+
+// ---------- Paper review & blueprint ----------
+
+export interface CoRow {
+  co_code: string;
+  min_questions: number;
+  min_percent: number | null;
+  actual: number;
+  actual_marks: number;
+  actual_percent: number;
+  met: boolean;
+}
+
+export interface Blueprint {
+  exam_id: string;
+  exam_name: string;
+  exam_type: AssessmentType;
+  pattern_id: string | null;
+  pattern_name: string | null;
+  tolerance_percent: number | null;
+  question_count: number;
+  total_marks: number;
+  target_marks: number | null;
+  compliant: boolean | null;
+  sections: SectionReport[];
+  units: DistributionRow[];
+  topics: DistributionRow[];
+  bloom: DistributionRow[];
+  difficulty: DistributionRow[];
+  question_types: DistributionRow[];
+  skills: DistributionRow[];
+  course_outcomes: CoRow[];
+  unassigned_question_ids: string[];
+  issues: string[];
+}
+
+export interface ReplacementCandidate {
+  question: Question;
+  matches: string[];
+  times_used: number;
+  last_used_at: string | null;
+  keeps_compliant: boolean | null;
+  new_issues: string[];
+}
+
+export interface ConstraintCheck {
+  name: string;
+  required: string;
+  actual: string;
+  ok: boolean;
+}
+
+export interface RegenerateResult {
+  question: Question;
+  source: "reused" | "generated";
+  checks: ConstraintCheck[];
+  all_constraints_met: boolean;
+  note: string;
+}
+
+/** Unsaved marks edits (question id -> marks) the server applies to the draft only. */
+export type MarksOverrides = Record<string, number>;
+
+export function fetchBlueprint(examId: string, questionIds?: string[], marksOverrides: MarksOverrides = {}) {
+  return apiFetch<Blueprint>(`/exams/${examId}/blueprint`, {
+    method: "POST",
+    body: JSON.stringify({ question_ids: questionIds ?? null, marks_overrides: marksOverrides }),
+  });
+}
+
+export function fetchReplacementCandidates(examId: string, questionIds: string[], targetId: string, marksOverrides: MarksOverrides = {}) {
+  return apiFetch<ReplacementCandidate[]>(`/exams/${examId}/review/candidates`, {
+    method: "POST",
+    body: JSON.stringify({ question_ids: questionIds, target_id: targetId, marks_overrides: marksOverrides }),
+  });
+}
+
+export function regenerateQuestion(examId: string, questionIds: string[], targetId: string, forceNew = false, marksOverrides: MarksOverrides = {}) {
+  return apiFetch<RegenerateResult>(`/exams/${examId}/review/regenerate`, {
+    method: "POST",
+    body: JSON.stringify({ question_ids: questionIds, target_id: targetId, force_new: forceNew, marks_overrides: marksOverrides }),
+  });
+}
+
+export function setQuestionMarks(examId: string, questionIds: string[], targetId: string, marks: number) {
+  return apiFetch<{ question: Question; copied: boolean }>(`/exams/${examId}/review/marks`, {
+    method: "POST",
+    body: JSON.stringify({ question_ids: questionIds, target_id: targetId, marks }),
+  });
+}
+
+export type ExportKind = "paper" | "answer-key" | "blueprint";
+
+/** Fetch an export PDF with the teacher's token and hand it to the browser as a download. */
+export async function downloadExport(examId: string, kind: ExportKind, fallbackName: string) {
+  const res = await fetch(`${BASE}/exams/${examId}/export/${kind}?tz_offset=${new Date().getTimezoneOffset()}`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    let message = `${res.status} ${res.statusText}`;
+    try {
+      message = (await res.json()).detail ?? message;
+    } catch {
+      // keep status text
+    }
+    throw new ApiError(message);
+  }
+  const blob = await res.blob();
+  const disposition = res.headers.get("content-disposition") ?? "";
+  const name = /filename="([^"]+)"/.exec(disposition)?.[1] ?? `${fallbackName}_${kind}.pdf`;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+// ---------- Question bank intelligence & evidence ----------
+
+export interface ExamUse {
+  exam_id: string;
+  name: string;
+  exam_type: AssessmentType;
+  bucket: ExamBucket;
+  date: string;
+}
+
+export interface QuestionUsage {
+  question_id: string;
+  times_used: number;
+  exams: ExamUse[];
+  last_used_at: string | null;
+  never_used: boolean;
+  recently_used: boolean;
+  frequently_used: boolean;
+  responses: number;
+  average_percent: number | null;
+}
+
+export interface BankUsage {
+  thresholds: { recent_days: number; frequent_count: number };
+  usage: Record<string, QuestionUsage>;
+}
+
+export function fetchQuestionUsage(subjectId: string) {
+  return apiFetch<BankUsage>(`/questions/usage?subject_id=${encodeURIComponent(subjectId)}`);
+}
+
+export interface SourceChunk {
+  source_document: string | null;
+  chunk_index: number | null;
+  excerpt: string;
+  relevance: number | null;
+}
+
+export interface Evidence {
+  question_id: string;
+  recorded: boolean;
+  note: string;
+  requested_topic: string | null;
+  model: string | null;
+  generated_at: string | null;
+  chunks: SourceChunk[];
+  graph_relations: string[];
+  topics: {
+    id: string;
+    name: string;
+    description: string;
+    importance_score: number | null;
+    prerequisites: string[];
+    leads_to: string[];
+    course_outcomes: string[];
+  }[];
+  bloom_level: BloomLevel;
+  difficulty_score: number | null;
+  difficulty: DifficultyLevel;
+  question_type: QuestionType;
+  skill_category: SkillCategory;
+  co_ids: string[];
+}
+
+export function fetchEvidence(subjectId: string, questionId: string) {
+  return apiFetch<Evidence>(`/questions/${encodeURIComponent(questionId)}/evidence?subject_id=${encodeURIComponent(subjectId)}`);
+}
+
+// ---------- Assessment analytics & topic risk ----------
+
+export interface QuestionStat {
+  question_id: string;
+  position: number;
+  text: string;
+  question_type: QuestionType;
+  bloom_level: number | null;
+  skill: SkillCategory | null;
+  marks: number;
+  topics: string[];
+  predicted_difficulty: number | null;
+  predicted_bucket: DifficultyLevel | null;
+  responses: number;
+  pending: number;
+  average_percent: number | null;
+  sufficient: boolean;
+  calibration_flag: "harder_than_predicted" | "easier_than_predicted" | null;
+}
+
+export interface AssessmentAnalytics {
+  exam_id: string;
+  name: string;
+  exam_type: AssessmentType;
+  date: string;
+  total_marks: number;
+  participation: { started: number; submitted: number; in_progress: number; timed_out: number; auto_submitted: number };
+  summary: ClassOverview["summary"];
+  grade_distribution: ClassOverview["grade_distribution"];
+  score_histogram: ClassOverview["score_histogram"];
+  breakdowns: Breakdowns;
+  questions: QuestionStat[];
+  calibration: { status: "ok" | "insufficient"; questions_used: number; spearman: number | null; note: string };
+  min_responses: number;
+}
+
+export function fetchAssessmentAnalytics(examId: string) {
+  return apiFetch<AssessmentAnalytics>(`/analytics/exams/${examId}`);
+}
+
+export interface TopicRiskRow {
+  topic_id: string;
+  name: string;
+  question_count: number;
+  coverage: "good" | "low" | "none";
+  answers: number;
+  percent: number | null;
+  performance: "good" | "at_risk" | "insufficient";
+}
+
+export interface TopicRisk {
+  min_questions: number;
+  risk_percent: number;
+  min_answers: number;
+  rows: TopicRiskRow[];
+  coverage_risks: TopicRiskRow[];
+  performance_risks: TopicRiskRow[];
+}
+
+export function fetchTopicRisk(subjectId: string, examType?: AssessmentType | null) {
+  const params = new URLSearchParams({ subject_id: subjectId });
+  if (examType) params.set("exam_type", examType);
+  return apiFetch<TopicRisk>(`/analytics/topic-risk?${params}`);
+}
+
+// ---------- Student attempt API (for the upcoming Student interface) ----------
+// Public endpoints: no teacher token; the exam password and the attempt id gate access.
+
+export interface AttemptState {
+  timing: {
+    state: "upcoming" | "live" | "closed";
+    closed_by: "teacher" | "schedule" | null;
+    server_time: string;
+    go_live_at: string | null;
+    closes_at: string | null;
+    duration_minutes: number | null;
+    opens_in_seconds: number | null;
+    closes_in_seconds: number | null;
+  };
+  attempt: {
+    attempt_id: string;
+    started_at: string;
+    deadline: string | null;
+    remaining_seconds: number | null;
+    expired: boolean;
+    submitted: boolean;
+    submitted_at: string | null;
+  };
+  exam: { id: string; name: string; duration_minutes: number | null; total_marks: number; questions: unknown[] } | null;
+  saved_answers: Record<string, string>;
+  save_seq: number;
+  last_saved_at: string | null;
+}
+
+export interface SaveAnswersResult {
+  saved_at: string | null;
+  save_seq: number;
+  applied: boolean;
+  saved_count: number;
+  remaining_seconds: number | null;
+  deadline: string | null;
+}
+
+export function getAttemptState(examId: string, attemptId: string) {
+  return apiFetch<AttemptState>(`/exams/${examId}/attempts/${attemptId}`);
+}
+
+export function saveAttemptAnswers(examId: string, attemptId: string, answers: Record<string, string>, seq: number) {
+  return apiFetch<SaveAnswersResult>(`/exams/${examId}/attempts/${attemptId}/answers`, {
+    method: "PUT",
+    body: JSON.stringify({ answers: Object.entries(answers).map(([question_id, answer]) => ({ question_id, answer })), seq }),
+  });
 }

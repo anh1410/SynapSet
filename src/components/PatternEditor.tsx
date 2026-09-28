@@ -331,7 +331,7 @@ export function PatternEditor({
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs font-semibold text-foreground">Course-outcome coverage</p>
-              <p className="text-[11px] text-muted-foreground">Minimum number of questions tagged with each CO</p>
+              <p className="text-[11px] text-muted-foreground">Minimum questions and/or minimum % of total marks tagged with each CO</p>
             </div>
             <Button size="sm" variant="outline" onClick={() => set("co_requirements", [...p.co_requirements, { co_code: `CO${p.co_requirements.length + 1}`, min_questions: 1 }])}>
               <Plus className="h-3.5 w-3.5" /> Add CO
@@ -341,8 +341,10 @@ export function PatternEditor({
             {p.co_requirements.map((c, i) => (
               <div key={i} className="flex items-center gap-1.5 rounded-lg border border-border p-1.5">
                 <Input className="h-7 w-20" value={c.co_code} onChange={(e) => set("co_requirements", p.co_requirements.map((x, idx) => (idx === i ? { ...x, co_code: e.target.value } : x)))} />
-                <span className="text-[11px] text-muted-foreground">min</span>
-                <Input className="h-7 w-14" type="number" min={1} value={c.min_questions} onChange={(e) => set("co_requirements", p.co_requirements.map((x, idx) => (idx === i ? { ...x, min_questions: num(e.target.value) } : x)))} />
+                <span className="text-[11px] text-muted-foreground">min q</span>
+                <Input className="h-7 w-14" type="number" min={0} value={c.min_questions} aria-label={`${c.co_code} minimum questions`} onChange={(e) => set("co_requirements", p.co_requirements.map((x, idx) => (idx === i ? { ...x, min_questions: num(e.target.value) } : x)))} />
+                <span className="text-[11px] text-muted-foreground">min %</span>
+                <Input className="h-7 w-16" type="number" min={0} max={100} placeholder="—" value={c.min_percent ?? ""} aria-label={`${c.co_code} minimum percent of marks`} onChange={(e) => set("co_requirements", p.co_requirements.map((x, idx) => (idx === i ? { ...x, min_percent: e.target.value === "" ? null : num(e.target.value) } : x)))} />
                 <button onClick={() => set("co_requirements", p.co_requirements.filter((_, idx) => idx !== i))} className="text-muted-foreground hover:text-destructive" aria-label="Remove CO">
                   <X className="h-3.5 w-3.5" />
                 </button>

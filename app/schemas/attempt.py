@@ -22,6 +22,14 @@ class Attempt(BaseModel):
     duration_minutes: int | None = None
     submitted_at: datetime | None = None
     submission_id: str | None = None
+    auto_submitted: bool = False  # submitted by the server from saved answers when time ran out / exam closed
+
+    # Server-side autosave: the student's latest answers (question id -> answer),
+    # so work survives refreshes and dropped connections. Saving never touches
+    # started_at or the deadline.
+    saved_answers: dict[str, str] = {}
+    save_seq: int = 0  # highest client sequence number applied; older/replayed saves are ignored
+    last_saved_at: datetime | None = None
 
     def deadline(self, exam: Exam) -> datetime | None:
         """When this attempt's time runs out: start + duration, capped at the

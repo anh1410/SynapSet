@@ -11,6 +11,7 @@ import { ExamResultsPage } from "@/pages/ExamResultsPage";
 import { AnswerKeyPage } from "@/pages/AnswerKeyPage";
 import { PatternsPage } from "@/pages/PatternsPage";
 import { PerformancePage } from "@/pages/PerformancePage";
+import { PaperReviewPage } from "@/pages/PaperReviewPage";
 import { AuthPage } from "@/pages/AuthPage";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,7 +28,8 @@ export type Page =
   | "results"
   | "answerKey"
   | "patterns"
-  | "performance";
+  | "performance"
+  | "review";
 
 function FirstSubjectGate() {
   const { createSubject } = useAuth();
@@ -82,6 +84,7 @@ function AppShell() {
   const [builderPatternId, setBuilderPatternId] = useState<string | null>(null);
   const [resultsExamId, setResultsExamId] = useState<string | null>(null);
   const [answerKeyExamId, setAnswerKeyExamId] = useState<string | null>(null);
+  const [reviewExamId, setReviewExamId] = useState<string | null>(null);
   const [bankSearch, setBankSearch] = useState<string | undefined>(undefined);
 
   const goToExamBuilder = (questionIds: string[]) => {
@@ -119,6 +122,11 @@ function AppShell() {
   const goToResults = (examId: string) => {
     setResultsExamId(examId);
     setPage("results");
+  };
+
+  const goToReview = (examId: string) => {
+    setReviewExamId(examId);
+    setPage("review");
   };
 
   const goToAnswerKey = (examId: string) => {
@@ -164,12 +172,13 @@ function AppShell() {
               />
             )}
             {page === "exams" && (
-              <ExamsPage onEdit={goToEditExam} onViewResults={goToResults} onViewAnswerKey={goToAnswerKey} />
+              <ExamsPage onEdit={goToEditExam} onViewResults={goToResults} onViewAnswerKey={goToAnswerKey} onReview={goToReview} />
             )}
             {page === "results" && resultsExamId && <ExamResultsPage examId={resultsExamId} onBack={goToExams} />}
             {page === "answerKey" && answerKeyExamId && <AnswerKeyPage examId={answerKeyExamId} onBack={goToExams} />}
             {page === "patterns" && <PatternsPage onBuildExam={goToBuildFromPattern} />}
             {page === "performance" && <PerformancePage />}
+            {page === "review" && reviewExamId && <PaperReviewPage key={reviewExamId} examId={reviewExamId} onBack={goToExams} />}
           </div>
         </main>
       </div>

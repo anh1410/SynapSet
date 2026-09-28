@@ -30,6 +30,15 @@ ConstraintFamily = Literal["sections", "bloom", "difficulty", "units", "course_o
 DISTRIBUTION_FAMILIES: tuple[ConstraintFamily, ...] = ("bloom", "difficulty", "units", "course_outcomes")
 
 _BLOOM_LABELS = {b.value: b.name.title() for b in BloomLevel}
+_TYPE_LABELS = {
+    "mcq": "Multiple Choice",
+    "fill_in_blank": "Fill in the Blank",
+    "short_answer": "Short Answer",
+    "long_answer": "Long Answer",
+    "numerical": "Numerical",
+    "code_fix": "Coding (Fix the Code)",
+}
+_SKILL_LABELS = {"conceptual": "Conceptual", "reasoning": "Reasoning", "coding": "Coding"}
 _DIFFICULTY_LABELS = {"easy": "Easy", "medium": "Medium", "hard": "Hard"}
 
 
@@ -50,14 +59,17 @@ class DistributionRow(BaseModel):
     label: str
     target_percent: float | None  # None = no target set (reported for information only)
     actual_percent: float
-    actual_marks: int
+    actual_marks: float  # whole numbers except topic rows, where multi-topic questions split their marks
     within_tolerance: bool
 
 
 class CoRow(BaseModel):
     co_code: str
     min_questions: int
-    actual: int
+    min_percent: float | None = None
+    actual: int  # questions tagged with this CO
+    actual_marks: int = 0
+    actual_percent: float = 0.0  # share of the pattern's total marks
     met: bool
 
 
@@ -70,6 +82,9 @@ class ComplianceReport(BaseModel):
     difficulty: list[DistributionRow]
     units: list[DistributionRow]
     course_outcomes: list[CoRow]
+    # Informational distributions (patterns don't target these), shown in the blueprint.
+    question_types: list[DistributionRow] = []
+    skills: list[DistributionRow] = []
     topics_covered: int
     unassigned_question_ids: list[str]
     issues: list[str]
@@ -205,8 +220,11 @@ def _add_family(model: _Model, family: ConstraintFamily) -> None:
     pattern = model.pattern
     if family == "course_outcomes":
         for req in pattern.co_requirements:
-            coeffs = {p: 1.0 for p, (qi, _) in enumerate(model.pairs) if req.co_code in model.questions[qi].co_ids}
-            model.add_row(coeffs, req.min_questions, np.inf)
+            tagged = [(p, model.questions[qi]) for p, (qi, _) in enumerate(model.pairs) if req.co_code in model.questions[qi].co_ids]
+            if req.min_questions:
+                model.add_row({p: 1.0 for p, _ in tagged}, req.min_questions, np.inf)
+            if req.min_percent:
+                model.add_row({p: float(q.marks) for p, q in tagged}, pattern.total_marks * req.min_percent / 100, np.inf)
         return
     for key, percent in _family_keys(pattern, family).items():
         lo, hi = _band(pattern, percent)
@@ -272,6 +290,25 @@ def _feasible_with(
 
 
 # ---------- reporting ----------
+
+
+def info_distribution(selected: list[Question], total_marks: int, key, labels: dict[str, str]) -> list[DistributionRow]:
+    """Share of marks per key, for distributions a pattern doesn't target."""
+    marks: Counter[str] = Counter()
+    for q in selected:
+        marks[key(q)] += q.marks
+    order = [k for k in labels if k in marks] + sorted(k for k in marks if k not in labels)
+    return [
+        DistributionRow(
+            key=k,
+            label=labels.get(k, k),
+            target_percent=None,
+            actual_percent=round(100 * marks[k] / total_marks, 1) if total_marks else 0.0,
+            actual_marks=marks[k],
+            within_tolerance=True,
+        )
+        for k in order
+    ]
 
 
 def _distribution_rows(
@@ -354,11 +391,28 @@ def build_report(
                 )
 
     co_rows = []
+    total = pattern.total_marks
     for req in pattern.co_requirements:
-        actual = sum(1 for q in selected if req.co_code in q.co_ids)
-        co_rows.append(CoRow(co_code=req.co_code, min_questions=req.min_questions, actual=actual, met=actual >= req.min_questions))
-        if actual < req.min_questions:
-            issues.append(f"{req.co_code}: {actual} of at least {req.min_questions} question(s)")
+        tagged = [q for q in selected if req.co_code in q.co_ids]
+        marks = sum(q.marks for q in tagged)
+        percent = round(100 * marks / total, 1) if total else 0.0
+        count_ok = len(tagged) >= req.min_questions
+        percent_ok = req.min_percent is None or percent + 1e-6 >= req.min_percent
+        co_rows.append(
+            CoRow(
+                co_code=req.co_code,
+                min_questions=req.min_questions,
+                min_percent=req.min_percent,
+                actual=len(tagged),
+                actual_marks=marks,
+                actual_percent=percent,
+                met=count_ok and percent_ok,
+            )
+        )
+        if not count_ok:
+            issues.append(f"{req.co_code}: {len(tagged)} of at least {req.min_questions} question(s)")
+        if not percent_ok:
+            issues.append(f"{req.co_code}: {percent:g}% of marks, needs at least {req.min_percent:g}%")
 
     if unassigned:
         issues.append(f"{len(unassigned)} question(s) don't fit any open section slot in this pattern")
@@ -376,6 +430,8 @@ def build_report(
         difficulty=difficulty,
         units=units,
         course_outcomes=co_rows,
+        question_types=info_distribution(selected, total, lambda q: q.question_type.value, _TYPE_LABELS),
+        skills=info_distribution(selected, total, lambda q: q.effective_skill_category.value, _SKILL_LABELS),
         topics_covered=len({t for q in selected for t in q.topic_ids}),
         unassigned_question_ids=[q.id for q in unassigned],
         issues=issues,

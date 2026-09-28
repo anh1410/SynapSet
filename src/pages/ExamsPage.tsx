@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState } from "react";
-import { FileStack, Clock, Lock, LockOpen, Pencil, Trash2, XCircle, CalendarClock, BarChart3, KeyRound } from "lucide-react";
+import { FileStack, Clock, Lock, LockOpen, Pencil, Trash2, XCircle, CalendarClock, BarChart3, KeyRound, FileCheck2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -57,10 +57,12 @@ export function ExamsPage({
   onEdit,
   onViewResults,
   onViewAnswerKey,
+  onReview,
 }: {
   onEdit: (examId: string) => void;
   onViewResults: (examId: string) => void;
   onViewAnswerKey: (examId: string) => void;
+  onReview: (examId: string) => void;
 }) {
   const { activeSubjectId } = useAuth();
   const [exams, setExams] = useState<Exam[]>([]);
@@ -175,6 +177,11 @@ export function ExamsPage({
                       {(exam.bucket === "live" || exam.bucket === "closed") && (
                         <Button size="sm" variant="outline" onClick={() => onViewResults(exam.id)}>
                           <BarChart3 className="h-3.5 w-3.5" /> Results
+                        </Button>
+                      )}
+                      {exam.question_ids.length > 0 && (
+                        <Button size="sm" variant="outline" onClick={() => onReview(exam.id)}>
+                          <FileCheck2 className="h-3.5 w-3.5" /> Review & export
                         </Button>
                       )}
                       {exam.question_ids.length > 0 && (

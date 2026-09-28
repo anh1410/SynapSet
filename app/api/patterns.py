@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from app.api.deps import get_current_teacher, require_subject
 from app.core.config import get_settings
 from app.core.exam_store import get_exam_store
-from app.core.graph_store import get_graph_store
+from app.core.graph_store import course_outcome_node_ids, get_graph_store
 from app.core.pattern_store import get_pattern_store
 from app.core.question_bank import get_question_bank
 from app.schemas.exam_pattern import ExamPattern, ExamPatternFields, pattern_presets
@@ -27,6 +27,7 @@ from app.services.pattern_assembly import (
 )
 from app.services.pattern_import import PatternImportResult, import_pattern
 from app.services.question_generation import generate_questions
+from app.services.question_usage import recently_used_ids
 
 router = APIRouter(prefix="/api/v1/patterns", tags=["patterns"], dependencies=[Depends(get_current_teacher)])
 
@@ -129,6 +130,8 @@ class AssembleRequest(BaseModel):
     # sections the bank can't fill, save them to the bank, then re-solve.
     generate_missing: bool = False
     max_generate: int = Field(default=8, ge=1, le=20)
+    # Leave out questions that appeared in a published exam within this many days.
+    avoid_recent_days: int | None = Field(default=None, ge=1, le=365)
 
 
 class GeneratedForGap(BaseModel):
@@ -140,6 +143,7 @@ class GeneratedForGap(BaseModel):
 class AssembleResponse(BaseModel):
     assembly: AssemblyResult
     generated: list[GeneratedForGap] = Field(default_factory=list)
+    excluded_recent: int = 0  # bank questions left out because they were used recently
 
 
 def _usage_counts(subject_id: str) -> dict[str, int]:
@@ -149,11 +153,12 @@ def _usage_counts(subject_id: str) -> dict[str, int]:
     return dict(counts)
 
 
-def _fill_gaps(pattern: ExamPattern, max_generate: int) -> list[GeneratedForGap]:
+def _fill_gaps(pattern: ExamPattern, max_generate: int, exclude: set[str] | None = None) -> list[GeneratedForGap]:
     graph_store = get_graph_store(pattern.subject_id)
     bank = get_question_bank(pattern.subject_id)
     graph = graph_store.graph
     counts: Counter[str] = Counter(t for q in bank.list() for t in q.topic_ids)
+    course_outcomes = course_outcome_node_ids(graph)
     topics = [
         TopicInfo(
             id=nid,
@@ -162,9 +167,11 @@ def _fill_gaps(pattern: ExamPattern, max_generate: int) -> list[GeneratedForGap]
             question_count=counts.get(nid, 0),
         )
         for nid, data in graph.nodes(data=True)
+        if nid not in course_outcomes  # COs aren't topics to write questions about
     ]
     results: list[GeneratedForGap] = []
-    for req in plan_gap_requests(pattern, bank.list(), topics, max_generate):
+    candidates = [q for q in bank.list() if q.id not in (exclude or set())]
+    for req in plan_gap_requests(pattern, candidates, topics, max_generate):
         try:
             drafts = generate_questions(
                 topic=req.topic_name,
@@ -207,14 +214,21 @@ def assemble_from_pattern(
     pattern = _require_pattern(pattern_id, teacher)
     bank = get_question_bank(pattern.subject_id)
     usage = _usage_counts(pattern.subject_id)
+    recent: set[str] = set()
+    if request.avoid_recent_days:
+        exams = [e for e in get_exam_store().list_by_subject(pattern.subject_id) if e.teacher_id == teacher.id]
+        recent = recently_used_ids(exams, request.avoid_recent_days)
 
-    result = assemble(pattern, bank.list(), usage_counts=usage)
+    def pool():
+        return [q for q in bank.list() if q.id not in recent]
+
+    result = assemble(pattern, pool(), usage_counts=usage)
     generated: list[GeneratedForGap] = []
     if not result.satisfied and request.generate_missing:
-        generated = _fill_gaps(pattern, request.max_generate)
+        generated = _fill_gaps(pattern, request.max_generate, exclude=recent)
         if any(g.question_id for g in generated):
-            result = assemble(pattern, bank.list(), usage_counts=usage)
-    return AssembleResponse(assembly=result, generated=generated)
+            result = assemble(pattern, pool(), usage_counts=usage)
+    return AssembleResponse(assembly=result, generated=generated, excluded_recent=len(recent & {q.id for q in bank.list()}))
 
 
 class CheckRequest(BaseModel):

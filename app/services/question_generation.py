@@ -10,7 +10,7 @@ from app.core.llm import get_genai_client
 from app.schemas.bloom import BloomLevel
 from app.schemas.course_outcome import CourseOutcome
 from app.schemas.generation import QuestionDraftBatch
-from app.schemas.question import Question, QuestionType
+from app.schemas.question import Question, QuestionProvenance, QuestionType, SourceChunk
 from app.services.code_sandbox import CodeTimeoutError, UnsafeCodeError, run_code
 from app.services.vector_indexing import query_similar_chunks
 
@@ -67,19 +67,22 @@ QUESTION_TYPE_INSTRUCTIONS: dict[QuestionType, str] = {
 }
 
 
-def _context_text(topic: str, subject_id: str, n_chunks: int = 5) -> str:
-    hits = query_similar_chunks(topic, subject_id, n_results=n_chunks)
+def _context_hits(topic: str, subject_id: str, n_chunks: int = 5) -> list[dict]:
+    return query_similar_chunks(topic, subject_id, n_results=n_chunks)
+
+
+def _context_text(hits: list[dict]) -> str:
     if not hits:
         return "(no indexed syllabus content found for this topic)"
     return "\n\n".join(f"[{h['metadata'].get('source_document')}] {h['text']}" for h in hits)
 
 
-def _related_topics_text(topic: str, graph_store: KnowledgeGraphStore) -> str:
+def graph_relation_lines(topic: str, graph_store: KnowledgeGraphStore) -> list[str]:
+    """Prerequisite / course-outcome relations touching a topic, as readable lines."""
     graph = graph_store.graph
     node_id = normalize_topic_name(topic)
     if node_id not in graph:
-        return "(topic not found in knowledge graph)"
-
+        return []
     lines: list[str] = []
     for pred in graph.predecessors(node_id):
         rel = graph.edges[pred, node_id].get("relation_type")
@@ -87,8 +90,26 @@ def _related_topics_text(topic: str, graph_store: KnowledgeGraphStore) -> str:
     for succ in graph.successors(node_id):
         rel = graph.edges[node_id, succ].get("relation_type")
         lines.append(f"- {topic} --[{rel}]--> {graph.nodes[succ].get('name', succ)}")
+    return lines
 
+
+def _related_topics_text(topic: str, graph_store: KnowledgeGraphStore) -> str:
+    if normalize_topic_name(topic) not in graph_store.graph:
+        return "(topic not found in knowledge graph)"
+    lines = graph_relation_lines(topic, graph_store)
     return "\n".join(lines) if lines else "(no direct relations found)"
+
+
+def chunks_from_hits(hits: list[dict], excerpt_chars: int = 600) -> list[SourceChunk]:
+    return [
+        SourceChunk(
+            source_document=h["metadata"].get("source_document"),
+            chunk_index=h["metadata"].get("chunk_index"),
+            excerpt=h["text"][:excerpt_chars],
+            relevance=round(1 - h["distance"], 3) if h.get("distance") is not None else None,
+        )
+        for h in hits
+    ]
 
 
 def _co_section(course_outcomes: list[CourseOutcome] | None) -> str:
@@ -172,9 +193,11 @@ def _generate_questions_once(
     settings = get_settings()
     client = get_genai_client()
 
+    hits = _context_hits(topic, subject_id)
+    relations = graph_relation_lines(topic, graph_store)
     prompt = GENERATION_PROMPT.format(
         topic=topic,
-        context=_context_text(topic, subject_id),
+        context=_context_text(hits),
         related_topics=_related_topics_text(topic, graph_store),
         co_section=_co_section(course_outcomes),
         num_questions=num_questions,
@@ -197,6 +220,12 @@ def _generate_questions_once(
         return []
 
     graph = graph_store.graph
+    provenance = QuestionProvenance(
+        requested_topic=topic,
+        retrieved_chunks=chunks_from_hits(hits),
+        graph_relations=[line.removeprefix("- ") for line in relations],
+        model=settings.generation_model,
+    )
     questions: list[Question] = []
     for draft in response.parsed.questions:
         topic_ids = [
@@ -211,12 +240,14 @@ def _generate_questions_once(
             marks=draft.marks,
             bloom_level=BloomLevel[draft.bloom_level],
             topic_ids=topic_ids,
-            co_ids=draft.co_codes,
+            co_ids=list(dict.fromkeys(draft.co_codes)),  # the model sometimes repeats a CO
             options=draft.options,
             correct_answer=draft.correct_answer,
             code_language=draft.code_language,
             starter_code=draft.starter_code,
             test_cases=draft.test_cases,
+            provenance=provenance,
+            source_document=provenance.retrieved_chunks[0].source_document if provenance.retrieved_chunks else None,
         )
         if question.question_type == QuestionType.CODE_FIX and not _reference_solution_passes(question):
             continue

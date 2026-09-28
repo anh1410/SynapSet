@@ -74,6 +74,19 @@ class AttemptResponse(BaseModel):
     timing: ExamTiming
     attempt: AttemptTiming
     exam: PublicExam | None  # questions; omitted once the attempt is submitted or expired
+    # Autosaved answers (question id -> answer) so a reconnecting client can restore its state.
+    saved_answers: dict[str, str] = {}
+    save_seq: int = 0
+    last_saved_at: datetime | None = None
+
+
+class SaveAnswersResult(BaseModel):
+    saved_at: datetime | None
+    save_seq: int
+    applied: bool  # False = this save was older than one already applied (a replayed/out-of-order request)
+    saved_count: int
+    remaining_seconds: int | None
+    deadline: datetime | None
 
 
 PublicExam.model_rebuild()
