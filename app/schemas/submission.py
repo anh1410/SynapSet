@@ -57,6 +57,7 @@ class Submission(BaseModel):
     student_name: str
     student_identifier: str | None = None
     attempt_id: str | None = None  # the timed attempt this submission closed, if any
+    student_id: str | None = None  # the student account whose attempt this was (dashboard results)
     # True when the server finalised the attempt from its autosaved answers
     # because time ran out or the exam was closed before the student submitted.
     auto_submitted: bool = False

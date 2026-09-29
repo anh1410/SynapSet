@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
+import { StudentAccessCard } from "@/components/StudentAccessCard";
 import {
   fetchGraph,
   topicNodes,
@@ -128,6 +129,8 @@ export function OverviewPage({ onNavigate }: { onNavigate: (p: Page) => void }) 
           );
         })}
       </div>
+
+      {activeSubjectId && <StudentAccessCard subjectId={activeSubjectId} />}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">

@@ -16,6 +16,9 @@ class Attempt(BaseModel):
     student_key: str
     student_name: str
     student_identifier: str | None = None
+    # The student account that started (or resumed) this attempt from their
+    # dashboard, if any. Plain exam-link attempts have none.
+    student_id: str | None = None
     started_at: datetime
     # Frozen at start so a later edit to the exam's duration can't retroactively
     # shorten (or extend) an attempt already in progress.

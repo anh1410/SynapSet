@@ -106,6 +106,12 @@ export function AuthPage() {
             </form>
           </CardContent>
         </Card>
+        <p className="mt-4 text-center text-xs text-muted-foreground">
+          Student?{" "}
+          <a href="/student" className="font-medium text-primary hover:underline">
+            Go to the student dashboard
+          </a>
+        </p>
       </div>
     </div>
   );

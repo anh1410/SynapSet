@@ -67,6 +67,9 @@ class Settings(BaseSettings):
     # Subjects (each teacher's separate, isolated workspaces)
     subject_store_path: str = str(BASE_DIR / "data" / "subjects.json")
 
+    # Student accounts + enrolments (student dashboard)
+    student_store_path: str = str(BASE_DIR / "data" / "students.json")
+
     # Auth
     jwt_secret: str = "dev-secret-change-me"
     jwt_expire_minutes: int = 60 * 24 * 7

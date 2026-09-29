@@ -38,6 +38,14 @@ class SubmissionStore:
             reverse=True,
         )
 
+    def list_by_student(self, student_id: str) -> list[Submission]:
+        """Submissions from attempts a student account started (newest first)."""
+        return sorted(
+            (s for s in self.submissions.values() if s.student_id == student_id),
+            key=lambda s: s.submitted_at,
+            reverse=True,
+        )
+
 
 @lru_cache
 def get_submission_store() -> SubmissionStore:

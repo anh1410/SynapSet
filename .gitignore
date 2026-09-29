@@ -20,6 +20,7 @@ teachers.json
 submissions.json
 attempts.json
 subjects.json
+students.json
 .pytest_cache/
 *.egg-info/
 tsconfig.tsbuildinfo

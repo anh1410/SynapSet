@@ -14,6 +14,7 @@ import { PerformancePage } from "@/pages/PerformancePage";
 import { PaperReviewPage } from "@/pages/PaperReviewPage";
 import { AuthPage } from "@/pages/AuthPage";
 import { StudentApp } from "@/pages/student/StudentApp";
+import { StudentPortal } from "@/pages/student/StudentPortal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AuthProvider, useAuth } from "@/lib/AuthContext";
@@ -211,6 +212,10 @@ export default function App() {
   const takeExamId = studentExamId();
   if (takeExamId) {
     return <StudentApp examId={takeExamId} />;
+  }
+  // `/student` is the student dashboard (student accounts, separate from teacher login).
+  if (/^\/student\/?$/.test(window.location.pathname)) {
+    return <StudentPortal />;
   }
   return (
     <AuthProvider>

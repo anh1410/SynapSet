@@ -17,15 +17,17 @@ import math
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from app.api.deps import get_optional_student
 from app.core import clock
 from app.core.attempt_store import get_attempt_store
 from app.core.exam_store import get_exam_store
 from app.core.question_bank import get_question_bank
 from app.schemas.attempt import Attempt
 from app.schemas.exam import Exam
+from app.schemas.student import Student
 from app.schemas.public_exam import (
     AttemptResponse,
     AttemptTiming,
@@ -167,22 +169,37 @@ class StartAttemptRequest(BaseModel):
 
 
 @router.post("/{exam_id}/start", response_model=AttemptResponse)
-def start_attempt(exam_id: str, request: StartAttemptRequest) -> AttemptResponse:
+def start_attempt(
+    exam_id: str, request: StartAttemptRequest, student: Student | None = Depends(get_optional_student)
+) -> AttemptResponse:
     """Start - or resume - this student's attempt. The start time comes from
     the server clock. Calling it again (refresh, reconnect, another device)
     returns the same attempt with the time remaining and the autosaved
-    answers, never a fresh timer."""
+    answers, never a fresh timer.
+
+    Anonymous (exam link + password) works as before. With a student token
+    (started from the dashboard) the identity is the account's name + roll
+    number - not what the request says - and the attempt is linked to the
+    account so its result shows on the student's dashboard."""
     exam = _published_exam_or_404(exam_id)
     _check_password(exam, request.password)
-    if not request.student_name.strip():
+    name = student.name if student else request.student_name.strip()
+    identifier = student.roll_number if student else request.student_identifier
+    if not name:
         raise HTTPException(status_code=422, detail="Student name is required")
     finalize_ended_attempts(exam)
 
     store = get_attempt_store()
-    key = student_key(request.student_name, request.student_identifier)
+    key = student_key(name, identifier)
     existing = store.find(exam.id, key)
     if existing is not None:
         _refuse_finished(existing)
+        if student is not None and existing.student_id != student.id:
+            if existing.student_id is not None:
+                raise HTTPException(status_code=403, detail="This attempt belongs to another account")
+            # Started from the plain link with this roll number: link it now.
+            existing.student_id = student.id
+            store.add(existing)
         return _attempt_response(existing, exam)
 
     # New attempts only while the exam is live.
@@ -191,8 +208,9 @@ def start_attempt(exam_id: str, request: StartAttemptRequest) -> AttemptResponse
         id=str(uuid.uuid4()),
         exam_id=exam.id,
         student_key=key,
-        student_name=request.student_name.strip(),
-        student_identifier=(request.student_identifier or "").strip() or None,
+        student_name=name,
+        student_identifier=(identifier or "").strip() or None,
+        student_id=student.id if student else None,
         started_at=clock.utcnow(),
         duration_minutes=exam.duration_minutes,
     )

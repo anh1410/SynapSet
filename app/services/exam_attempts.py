@@ -125,6 +125,7 @@ def grade_and_record(
         student_name=student_name,
         student_identifier=student_identifier,
         attempt_id=attempt.id if attempt else None,
+        student_id=attempt.student_id if attempt else None,
         auto_submitted=auto_submitted,
         started_at=attempt.started_at if attempt else None,
         answers=graded,

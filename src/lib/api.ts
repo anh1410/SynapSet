@@ -157,11 +157,27 @@ export interface Subject {
   id: string;
   teacher_id: string;
   name: string;
+  join_code: string | null;
   created_at: string;
 }
 
 export function listSubjects() {
   return apiFetch<Subject[]>("/subjects");
+}
+
+/** The code students enter on their dashboard to join a subject. */
+export interface JoinCodeInfo {
+  subject_id: string;
+  join_code: string;
+  enrolled_count: number;
+}
+
+export function fetchJoinCode(subjectId: string) {
+  return apiFetch<JoinCodeInfo>(`/subjects/${subjectId}/join-code`);
+}
+
+export function rotateJoinCode(subjectId: string) {
+  return apiFetch<JoinCodeInfo>(`/subjects/${subjectId}/join-code/rotate`, { method: "POST" });
 }
 
 export function createSubject(name: string) {
@@ -263,13 +279,18 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
   return res.json() as Promise<T>;
 }
 
-/** Fetch for the public student endpoints: never sends the teacher's token,
- *  and a 401 (wrong exam password) is an ordinary error - it must not end a
- *  teacher session that happens to be open in the same browser. */
-async function studentFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+/** Fetch for the student endpoints: never sends the teacher's token, and a
+ *  401 (wrong exam password, expired student session) is an ordinary error -
+ *  it must not end a teacher session that happens to be open in the same
+ *  browser. `studentToken` is the student dashboard session, when there is one. */
+async function studentFetch<T>(path: string, options: RequestInit = {}, studentToken?: string | null): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...options,
-    headers: { "Content-Type": "application/json", ...options.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...(studentToken ? { Authorization: `Bearer ${studentToken}` } : {}),
+      ...options.headers,
+    },
   });
   if (!res.ok) throw await responseError(res);
   return res.json() as Promise<T>;
@@ -1180,9 +1201,15 @@ export function fetchExamTiming(examId: string) {
   return studentFetch<ExamTiming>(`/exams/${examId}/timing`);
 }
 
-/** Starts this student's attempt, or resumes it (same timer, saved answers). */
-export function startAttempt(examId: string, identity: StudentIdentity) {
-  return studentFetch<AttemptState>(`/exams/${examId}/start`, { method: "POST", body: JSON.stringify(identity) });
+/** Starts this student's attempt, or resumes it (same timer, saved answers).
+ *  With a student dashboard token the server uses the account's identity and
+ *  links the attempt to it (so the result shows on the dashboard). */
+export function startAttempt(examId: string, identity: StudentIdentity, studentToken?: string | null) {
+  return studentFetch<AttemptState>(
+    `/exams/${examId}/start`,
+    { method: "POST", body: JSON.stringify(identity) },
+    studentToken
+  );
 }
 
 export function submitAttempt(examId: string, identity: StudentIdentity, attemptId: string, answers: Record<string, string>) {
@@ -1214,4 +1241,102 @@ export function saveAttemptAnswers(examId: string, attemptId: string, answers: R
     method: "PUT",
     body: JSON.stringify({ answers: Object.entries(answers).map(([question_id, answer]) => ({ question_id, answer })), seq }),
   });
+}
+
+// ---------- Student dashboard (/student) ----------
+// Student accounts: role="student" tokens, never accepted by teacher endpoints.
+// Mirrors app/api/student_portal.py.
+
+export interface StudentPublic {
+  id: string;
+  email: string;
+  name: string;
+  roll_number: string;
+  created_at: string;
+}
+
+export interface StudentAuthResponse {
+  access_token: string;
+  student: StudentPublic;
+}
+
+export interface StudentSubject {
+  id: string;
+  name: string;
+  teacher_name: string;
+}
+
+export type MyExamStatus = "not_started" | "in_progress" | "submitted" | "auto_submitted" | "not_submitted" | "missed";
+
+export interface StudentExamRow {
+  id: string;
+  name: string;
+  subject_id: string;
+  subject_name: string;
+  exam_type: AssessmentType;
+  total_marks: number;
+  question_count: number;
+  duration_minutes: number | null;
+  password_required: boolean;
+  state: "upcoming" | "live" | "closed";
+  closed_by: "teacher" | "schedule" | null;
+  go_live_at: string | null;
+  closes_at: string | null;
+  opens_in_seconds: number | null;
+  closes_in_seconds: number | null;
+  my_status: MyExamStatus;
+  remaining_seconds: number | null;
+  submitted_at: string | null;
+}
+
+export interface StudentResult {
+  submission_id: string;
+  exam_id: string;
+  exam_name: string;
+  subject_name: string;
+  exam_type: AssessmentType | null;
+  submitted_at: string;
+  auto_submitted: boolean;
+  status: "graded" | "pending_review";
+  graded_marks: number;
+  graded_max_marks: number;
+  pending_review_marks: number;
+  pending_review_count: number;
+  total_max_marks: number;
+  final_marks: number | null;
+  final_percent: number | null;
+  grade: string | null;
+  grade_label: string | null;
+}
+
+export function studentSignup(data: { name: string; roll_number: string; email: string; password: string }) {
+  return studentFetch<StudentAuthResponse>("/student/auth/signup", { method: "POST", body: JSON.stringify(data) });
+}
+
+export function studentLogin(email: string, password: string) {
+  return studentFetch<StudentAuthResponse>("/student/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
+}
+
+export function studentMe(token: string) {
+  return studentFetch<StudentPublic>("/student/auth/me", {}, token);
+}
+
+export function listMySubjects(token: string) {
+  return studentFetch<StudentSubject[]>("/student/subjects", {}, token);
+}
+
+export function joinSubject(token: string, code: string) {
+  return studentFetch<StudentSubject>("/student/subjects/join", { method: "POST", body: JSON.stringify({ code }) }, token);
+}
+
+export function leaveSubject(token: string, subjectId: string) {
+  return studentFetch<{ left: string }>(`/student/subjects/${subjectId}`, { method: "DELETE" }, token);
+}
+
+export function listMyExams(token: string) {
+  return studentFetch<{ server_time: string; exams: StudentExamRow[] }>("/student/exams", {}, token);
+}
+
+export function listMyResults(token: string) {
+  return studentFetch<StudentResult[]>("/student/results", {}, token);
 }

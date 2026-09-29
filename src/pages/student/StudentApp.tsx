@@ -8,7 +8,7 @@
  * answer from the server (403/409) lands on a clear ended screen.
  */
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { AlertCircle, CalendarClock, CheckCircle2, Clock, GraduationCap, Hourglass, Loader2, Lock, SearchX } from "lucide-react";
+import { AlertCircle, CalendarClock, CheckCircle2, Clock, GraduationCap, Hourglass, LayoutDashboard, Loader2, Lock, SearchX } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -20,6 +20,7 @@ import {
   setStoredAttempt,
   setStoredReceipt,
 } from "@/lib/studentSession";
+import { clearStudentAccount, getStudentAccount } from "@/lib/studentAccount";
 import { formatClock, useServerCountdown } from "@/lib/useServerCountdown";
 import { StudentExam } from "@/pages/student/StudentExam";
 import { SubmissionReceiptView } from "@/pages/student/SubmissionReceiptView";
@@ -28,6 +29,7 @@ import { endedFromError, viewForAttempt, type EndedReason, type StudentView } fr
 const fmtDateTime = (iso: string) => new Date(iso).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
 
 function Shell({ title, children }: { title?: string; children: ReactNode }) {
+  const signedIn = getStudentAccount() !== null;
   return (
     <div className="min-h-screen bg-secondary/40">
       <header className="border-b border-border bg-white">
@@ -37,6 +39,11 @@ function Shell({ title, children }: { title?: string; children: ReactNode }) {
           </div>
           <span className="text-sm font-semibold text-foreground">SynapSet</span>
           {title && <span className="truncate text-sm text-muted-foreground">· {title}</span>}
+          {signedIn && (
+            <a href="/student" className="ml-auto flex items-center gap-1 text-xs font-medium text-primary hover:underline">
+              <LayoutDashboard className="h-3.5 w-3.5" /> My dashboard
+            </a>
+          )}
         </div>
       </header>
       <main className="mx-auto max-w-5xl px-4 py-8">{children}</main>
@@ -95,6 +102,8 @@ function Lobby({
   onStarted: (attempt: AttemptState, identity: StudentIdentity) => void;
   onEnded: (view: StudentView) => void;
 }) {
+  // Signed in from the dashboard: the account is the identity (and links the attempt).
+  const [account, setAccount] = useState(() => getStudentAccount());
   const [name, setName] = useState("");
   const [roll, setRoll] = useState("");
   const [password, setPassword] = useState("");
@@ -114,17 +123,23 @@ function Lobby({
 
   const handleStart = async (e: FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) return;
-    const identity: StudentIdentity = { student_name: name.trim(), student_identifier: roll.trim() || null, password };
+    const identity: StudentIdentity = account
+      ? { student_name: account.student.name, student_identifier: account.student.roll_number, password }
+      : { student_name: name.trim(), student_identifier: roll.trim() || null, password };
+    if (!identity.student_name) return;
     setBusy(true);
     setError(null);
     try {
-      const attempt = await startAttempt(examId, identity);
+      const attempt = await startAttempt(examId, identity, account?.token);
       onStarted(attempt, identity);
     } catch (err) {
       const ended = endedFromError(err);
       if (ended) return onEnded(ended);
-      if (err instanceof ApiError && err.status === 401) setError("Incorrect exam password.");
+      if (err instanceof ApiError && err.status === 401 && /student session/i.test(err.message)) {
+        clearStudentAccount();
+        setAccount(null);
+        setError("Your student session has expired. Sign in again from your dashboard, or enter your details below.");
+      } else if (err instanceof ApiError && err.status === 401) setError("Incorrect exam password.");
       else if (err instanceof ApiError && /not live yet/i.test(err.message)) onRefresh();
       else setError(err instanceof ApiError ? err.message : "Couldn't reach the server. Check your connection and try again.");
     } finally {
@@ -173,19 +188,31 @@ function Lobby({
           </div>
         </div>
         <form className="space-y-3" onSubmit={handleStart}>
-          <div className="space-y-1">
-            <label htmlFor="student-name" className="text-xs font-medium text-foreground">
-              Full name
-            </label>
-            <Input id="student-name" value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" required />
-          </div>
-          <div className="space-y-1">
-            <label htmlFor="student-roll" className="text-xs font-medium text-foreground">
-              Roll number
-            </label>
-            <Input id="student-roll" value={roll} onChange={(e) => setRoll(e.target.value)} autoComplete="off" />
-            <p className="text-[11px] text-muted-foreground">Use the same name and roll number to get back into your exam if you're disconnected.</p>
-          </div>
+          {account ? (
+            <div className="rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs">
+              <p className="text-muted-foreground">Signed in as</p>
+              <p className="font-medium text-foreground">
+                {account.student.name} · {account.student.roll_number}
+              </p>
+              <p className="mt-1 text-[11px] text-muted-foreground">Your result will appear on your dashboard.</p>
+            </div>
+          ) : (
+            <>
+              <div className="space-y-1">
+                <label htmlFor="student-name" className="text-xs font-medium text-foreground">
+                  Full name
+                </label>
+                <Input id="student-name" value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" required />
+              </div>
+              <div className="space-y-1">
+                <label htmlFor="student-roll" className="text-xs font-medium text-foreground">
+                  Roll number
+                </label>
+                <Input id="student-roll" value={roll} onChange={(e) => setRoll(e.target.value)} autoComplete="off" />
+                <p className="text-[11px] text-muted-foreground">Use the same name and roll number to get back into your exam if you're disconnected.</p>
+              </div>
+            </>
+          )}
           <div className="space-y-1">
             <label htmlFor="exam-password" className="text-xs font-medium text-foreground">
               Exam password
@@ -209,7 +236,7 @@ function Lobby({
               Once you start, the {timing.duration_minutes}-minute timer keeps running even if you close this page.
             </p>
           )}
-          <Button type="submit" className="w-full" disabled={busy || !name.trim()}>
+          <Button type="submit" className="w-full" disabled={busy || (!account && !name.trim())}>
             {busy ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" /> Starting…
@@ -258,12 +285,13 @@ export function StudentApp({ examId }: { examId: string }) {
       return;
     }
     // Resume: /start with the same identity returns the same attempt.
-    startAttempt(examId, stored.identity)
+    startAttempt(examId, stored.identity, getStudentAccount()?.token)
       .then((attempt) => finish(viewForAttempt(attempt, stored.identity)))
       .catch((e) => {
         const ended = endedFromError(e);
         if (ended) return finish(ended);
         if (e instanceof ApiError) {
+          if (e.status === 401 && /student session/i.test(e.message)) clearStudentAccount();
           clearStoredAttempt(examId); // e.g. the password changed: start over from the lobby
           return void loadTiming();
         }
