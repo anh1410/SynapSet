@@ -19,7 +19,7 @@ export const BLOOM_LABELS: Record<BloomLevel, string> = {
   6: "Create",
 };
 
-export type QuestionType = "mcq" | "short_answer" | "long_answer" | "numerical" | "fill_in_blank" | "code_fix";
+export type QuestionType = "mcq" | "short_answer" | "long_answer" | "numerical" | "fill_in_blank" | "code_fix" | "code_write";
 
 export const QUESTION_TYPE_LABELS: Record<QuestionType, string> = {
   mcq: "Multiple Choice",
@@ -28,7 +28,13 @@ export const QUESTION_TYPE_LABELS: Record<QuestionType, string> = {
   numerical: "Numerical",
   fill_in_blank: "Fill in the Blank (Options)",
   code_fix: "Coding (Fix the Code)",
+  code_write: "Coding (Write the Program)",
 };
+
+/** Programming questions: answered with code, auto-graded against hidden test cases. */
+export function isCodingType(t: QuestionType): boolean {
+  return t === "code_fix" || t === "code_write";
+}
 
 export const QUESTION_TYPE_ORDER: QuestionType[] = [
   "mcq",
@@ -37,6 +43,7 @@ export const QUESTION_TYPE_ORDER: QuestionType[] = [
   "long_answer",
   "numerical",
   "code_fix",
+  "code_write",
 ];
 
 export type Difficulty = "Easy" | "Medium" | "Hard";
@@ -52,7 +59,7 @@ export const SKILL_LABELS: Record<SkillCategory, string> = {
 /** Mirrors app/schemas/skill.py resolve_skill_category. */
 export function effectiveSkill(q: Pick<Question, "question_type" | "bloom_level" | "skill_category">): SkillCategory {
   if (q.skill_category) return q.skill_category;
-  if (q.question_type === "code_fix") return "coding";
+  if (isCodingType(q.question_type)) return "coding";
   return q.bloom_level >= 3 ? "reasoning" : "conceptual";
 }
 
@@ -77,6 +84,10 @@ export interface Question {
   code_language: string | null;
   starter_code: string | null;
   test_cases: CodeTestCase[] | null;
+  /** code_write only: framed as an interview / real-world scenario. */
+  scenario_based?: boolean;
+  /** "generated" by the AI pipeline or "manual" (teacher-written). */
+  origin?: "generated" | "manual" | null;
   difficulty_score: number | null;
   embedding_id: string | null;
   is_duplicate_of: string | null;
@@ -369,6 +380,8 @@ export interface GenerateQuestionsParams {
   bloom_level: BloomLevel;
   marks: number;
   question_type: QuestionType;
+  /** code_write only: interview / real-world scenario framing. */
+  scenario_based?: boolean;
   check_duplicates?: boolean;
   save_to_bank?: boolean;
 }
@@ -394,6 +407,51 @@ export function saveQuestion(subjectId: string, question: Question) {
 export function deleteQuestion(subjectId: string, id: string) {
   return apiFetch<{ deleted: string }>(`/questions/${id}?subject_id=${encodeURIComponent(subjectId)}`, {
     method: "DELETE",
+  });
+}
+
+/** What the teacher wrote; only `text` is required. Mirrors app/services/question_analysis.py QuestionInput. */
+export interface QuestionDraftInput {
+  text: string;
+  question_type: QuestionType | null; // null = let the AI choose
+  options: string[] | null;
+  correct_answer: string | null;
+  code_language: string | null;
+  starter_code: string | null;
+  test_cases: CodeTestCase[] | null;
+  marks: number | null;
+  scenario_based: boolean;
+}
+
+export interface TestCaseResult {
+  input: string;
+  expected_output: string;
+  actual_output: string;
+  passed: boolean;
+  error: string | null;
+}
+
+export interface QuestionAnalysis {
+  method: "ai" | "heuristic";
+  note: string | null;
+  question_type: QuestionType;
+  bloom_level: BloomLevel;
+  bloom_rationale: string;
+  topic_ids: string[];
+  co_ids: string[];
+  suggested_marks: number;
+  skill_category: SkillCategory;
+  difficulty: DifficultyScore;
+  duplicate_matches: DuplicateMatch[];
+  suggested_test_cases: CodeTestCase[];
+  code_check: { passed: number; total: number; results: TestCaseResult[] } | null;
+}
+
+/** AI classification of a teacher-written question (nothing is saved). */
+export function analyzeQuestion(subjectId: string, draft: QuestionDraftInput) {
+  return apiFetch<QuestionAnalysis>("/questions/analyze", {
+    method: "POST",
+    body: JSON.stringify({ subject_id: subjectId, ...draft }),
   });
 }
 
@@ -1134,6 +1192,7 @@ export interface PublicQuestion {
   options: string[] | null;
   code_language: string | null;
   starter_code: string | null;
+  scenario_based?: boolean;
 }
 
 export interface ExamTiming {

@@ -85,12 +85,19 @@ def question_evidence(question: Question, graph_store: KnowledgeGraphStore, subj
         try:
             chunks = chunks_from_hits(query_similar_chunks(question.text, subject_id, n_results=3))
             note = (
+                "Written by the teacher (classified by AI when it was added), so there are no generation sources. "
+                "Shown instead: the course-material passages most similar to it, retrieved now."
+                if question.origin == "manual" else
                 "Generation sources weren't recorded for this question (created before source tracking, or written by hand). "
                 "Shown instead: the course-material passages most similar to it, retrieved now."
             )
         except Exception:
             chunks = []
-            note = "Generation sources weren't recorded for this question, and similar material couldn't be retrieved right now."
+            note = (
+                "Written by the teacher, and similar course material couldn't be retrieved right now."
+                if question.origin == "manual" else
+                "Generation sources weren't recorded for this question, and similar material couldn't be retrieved right now."
+            )
     return Evidence(
         question_id=question.id,
         recorded=recorded,

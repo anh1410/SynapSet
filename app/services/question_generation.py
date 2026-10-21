@@ -10,8 +10,15 @@ from app.core.llm import get_genai_client
 from app.schemas.bloom import BloomLevel
 from app.schemas.course_outcome import CourseOutcome
 from app.schemas.generation import QuestionDraftBatch
-from app.schemas.question import Question, QuestionProvenance, QuestionType, SourceChunk
-from app.services.code_sandbox import CodeTimeoutError, UnsafeCodeError, run_code
+from app.schemas.question import CODING_TYPES, CodeTestCase, Question, QuestionProvenance, QuestionType, SourceChunk
+from app.services.code_sandbox import (
+    ALLOWED_IMPORTS,
+    CodeTimeoutError,
+    UnsafeCodeError,
+    normalize_output,
+    outputs_match,
+    run_code,
+)
 from app.services.vector_indexing import query_similar_chunks
 
 GENERATION_PROMPT = """You are an exam question writer for a university course. Write exam questions \
@@ -30,12 +37,24 @@ Write {num_questions} {question_type} question(s) at Bloom's level "{bloom_level
 each, about "{topic}".
 
 FORMAT RULES for {question_type}: {type_instruction}
-
+{style_instruction}{feedback}
 - Ground every question in the syllabus context provided.
 - Tag each question with the topic names it covers (topic_names): include "{topic}" and any related \
 topics from the list above that the question actually draws on.
 - If Course Outcomes were given, tag applicable co_codes; otherwise leave co_codes empty.
 """
+
+# The auto-grader's sandbox (app/services/code_sandbox.py) rejects code that
+# breaks these rules, so every reference solution and starter program must
+# follow them or the draft fails its own check and is dropped.
+SANDBOX_RULES = (
+    " SANDBOX RULES for every program you write (starter_code and correct_answer): read input ONLY with "
+    "`input()` - never `sys.stdin`; you may import ONLY these modules: "
+    + ", ".join(sorted(ALLOWED_IMPORTS))
+    + "; do NOT use the words os, sys, subprocess, open, eval, exec, compile, globals, locals or vars anywhere "
+    "in the code, not even inside strings or comments; do NOT wrap the code in `if __name__ == \"__main__\":` "
+    "(it would never run) - write a plain top-level script."
+)
 
 QUESTION_TYPE_INSTRUCTIONS: dict[QuestionType, str] = {
     QuestionType.MCQ: "Include exactly 4 options in `options` and `correct_answer` must exactly match one option.",
@@ -63,8 +82,32 @@ QUESTION_TYPE_INSTRUCTIONS: dict[QuestionType, str] = {
         "calls, one value per line if there are several; use an empty string if the program takes no "
         "input) that exercise the fixed behavior — these are used to auto-grade the student's submitted "
         "fix by running it and comparing stdout. Leave `options` empty."
-    ),
+    ) + SANDBOX_RULES,
+    QuestionType.CODE_WRITE: (
+        "Set `code_language` to \"python\" (the only language the auto-grader currently runs). The student "
+        "writes the WHOLE program themselves. Put a complete problem statement in `text`: what the program "
+        "must do, an **Input format** section, an **Output format** section, any constraints, and one worked "
+        "example (sample input and sample output). The program MUST read its input via `input()` (one value "
+        "or line per `input()` call, exactly as the input format says) and MUST print its result via "
+        "`print()` - no bare functions with a `return` value only. Put a correct, complete reference program "
+        "in `correct_answer`; it must produce exactly the expected outputs of `test_cases`. Leave "
+        "`starter_code` empty (or at most a 1-2 line input-reading skeleton). Populate `test_cases` with 3-5 "
+        "hidden input/expected_output pairs (input is the exact text fed to input(), one value per line; "
+        "expected_output is exactly what the reference program prints) covering normal cases and at least "
+        "one edge case. Leave `options` empty."
+    ) + SANDBOX_RULES,
 }
+
+# Extra instruction appended for code_write questions asked to be scenario-based.
+SCENARIO_INSTRUCTION = (
+    "STYLE: interview / industry scenario. Frame the problem the way a technical interview at a "
+    "software company would: a short, realistic business scenario (e.g. an e-commerce order queue, a "
+    "ride-sharing dispatcher, a bank transaction log, a library system, a delivery route planner) that the "
+    "student must translate into the algorithm or data structure for this topic. Keep the scenario "
+    "concrete, state exactly what the program reads and prints, and keep it solvable in an exam. Even in "
+    "this style the reference program reads every line with input() (first line = count, then a loop) - "
+    "never sys.stdin."
+)
 
 
 def _context_hits(topic: str, subject_id: str, n_chunks: int = 5) -> list[dict]:
@@ -119,22 +162,37 @@ def _co_section(course_outcomes: list[CourseOutcome] | None) -> str:
     return f"COURSE OUTCOMES (tag co_codes from this list only):\n{listed}\n"
 
 
-def _reference_solution_passes(question: Question) -> bool:
-    """Sanity-checks a code_fix draft by running its own reference solution
-    against its own test cases before it ever reaches a student — catches
-    the LLM writing an inconsistent solution/test-case pair. A draft that
-    fails this is dropped rather than surfaced, mirroring how a bad diagram
-    or empty worksheet grid gets dropped elsewhere in this pipeline."""
+def _reference_solution_problem(question: Question) -> str | None:
+    """Sanity-checks a coding draft (code_fix / code_write) before it ever
+    reaches a student, and settles its test cases.
+
+    The reference solution is run on every test input. The model works out
+    expected outputs in its head and often slips on some, so the outputs the
+    graded tests use are the ones the solution actually prints. As an anchor
+    that the solution really implements the task the model described, at
+    least one of the model's own expected outputs must agree with the run.
+    A draft whose solution errors, prints nothing, or never agrees with the
+    model is dropped rather than surfaced.
+
+    Returns None when the draft is usable (test cases settled in place), else
+    a short reason - fed back into the next attempt's prompt."""
     if not question.correct_answer or not question.test_cases:
-        return False
+        return "the reference solution (correct_answer) or the test_cases were missing"
+    settled: list[CodeTestCase] = []
+    agreed = 0
     for case in question.test_cases:
         try:
-            actual = run_code(question.correct_answer, case.input).strip()
-        except (UnsafeCodeError, CodeTimeoutError):
-            return False
-        if actual != case.expected_output.strip():
-            return False
-    return True
+            actual = normalize_output(run_code(question.correct_answer, case.input))
+        except (UnsafeCodeError, CodeTimeoutError) as exc:
+            return f"the auto-grader could not run the reference solution: {exc}"
+        if not actual:
+            return f"the reference solution printed nothing for input {case.input!r}"
+        agreed += outputs_match(actual, case.expected_output)
+        settled.append(CodeTestCase(input=case.input, expected_output=actual))
+    if not agreed:
+        return "the reference solution's output matched none of the expected outputs in test_cases"
+    question.test_cases = settled
+    return None
 
 
 def generate_questions(
@@ -146,18 +204,22 @@ def generate_questions(
     marks: int = 5,
     question_type: QuestionType = QuestionType.SHORT_ANSWER,
     course_outcomes: list[CourseOutcome] | None = None,
+    scenario_based: bool = False,
 ) -> list[Question]:
     """Generate exam questions for a topic, grounded in retrieved syllabus context
     and augmented with the topic's prerequisite/CO relationships from the knowledge graph.
+    `scenario_based` (code_write only) frames the problem as an interview-style scenario.
 
-    code_fix drafts that fail their own reference-solution check (see
-    _reference_solution_passes) are dropped by _generate_questions_once. For a
+    Coding drafts (code_fix / code_write) that fail their own reference-solution check (see
+    _reference_solution_problem) are dropped by _generate_questions_once. For a
     single-question request that means one bad LLM draft returns nothing at
     all, so retry the whole generation call a couple of times in that specific
-    case rather than surfacing "no question returned" to the teacher.
+    case rather than surfacing "no question returned" to the teacher - telling
+    the model each time why its previous draft was rejected.
     """
-    attempts = 3 if question_type == QuestionType.CODE_FIX else 1
+    attempts = 3 if question_type in CODING_TYPES else 1
     questions: list[Question] = []
+    rejections: list[str] = []
     for _ in range(attempts):
         questions = _generate_questions_once(
             topic=topic,
@@ -168,6 +230,8 @@ def generate_questions(
             marks=marks,
             question_type=question_type,
             course_outcomes=course_outcomes,
+            scenario_based=scenario_based and question_type == QuestionType.CODE_WRITE,
+            rejections=rejections,
         )
         if questions:
             break
@@ -189,7 +253,11 @@ def _generate_questions_once(
     marks: int,
     question_type: QuestionType,
     course_outcomes: list[CourseOutcome] | None,
+    scenario_based: bool = False,
+    rejections: list[str] | None = None,
 ) -> list[Question]:
+    """One generation call. `rejections` collects why coding drafts were
+    rejected (and earlier reasons are shown to the model in the prompt)."""
     settings = get_settings()
     client = get_genai_client()
 
@@ -205,6 +273,11 @@ def _generate_questions_once(
         bloom_level=bloom_level.name,
         marks=marks,
         type_instruction=QUESTION_TYPE_INSTRUCTIONS[question_type],
+        style_instruction=f"{SCENARIO_INSTRUCTION}\n" if scenario_based else "",
+        feedback=(
+            "PREVIOUS ATTEMPT REJECTED - fix this: " + "; ".join(dict.fromkeys(rejections)) + "\n"
+            if rejections else ""
+        ),
     )
 
     response = client.models.generate_content(
@@ -246,11 +319,17 @@ def _generate_questions_once(
             code_language=draft.code_language,
             starter_code=draft.starter_code,
             test_cases=draft.test_cases,
+            scenario_based=scenario_based and draft.question_type == QuestionType.CODE_WRITE,
+            origin="generated",
             provenance=provenance,
             source_document=provenance.retrieved_chunks[0].source_document if provenance.retrieved_chunks else None,
         )
-        if question.question_type == QuestionType.CODE_FIX and not _reference_solution_passes(question):
-            continue
+        if question.question_type in CODING_TYPES:
+            problem = _reference_solution_problem(question)
+            if problem:
+                if rejections is not None:
+                    rejections.append(problem)
+                continue
         questions.append(question)
 
     return questions

@@ -20,7 +20,8 @@ class PublicQuestion(BaseModel):
     bloom_level: BloomLevel
     options: list[str] | None = None  # mcq/fill_in_blank choices (no correct_answer)
     code_language: str | None = None
-    starter_code: str | None = None  # code_fix only (no test_cases/correct_answer)
+    starter_code: str | None = None  # coding types (no test_cases/correct_answer)
+    scenario_based: bool = False  # code_write framed as an interview scenario
 
     @classmethod
     def from_question(cls, q: Question) -> "PublicQuestion":
@@ -33,6 +34,7 @@ class PublicQuestion(BaseModel):
             options=q.options,
             code_language=q.code_language,
             starter_code=q.starter_code,
+            scenario_based=q.scenario_based,
         )
 
 

@@ -31,7 +31,7 @@ def resolve_skill_category(
 ) -> SkillCategory:
     if override:
         return SkillCategory(override)
-    if question_type == "code_fix":
+    if question_type in ("code_fix", "code_write"):
         return SkillCategory.CODING
     if bloom_level >= REASONING_MIN_BLOOM:
         return SkillCategory.REASONING

@@ -49,6 +49,7 @@ import {
   type QuestionUsage,
   type RegenerateResult,
   type ReplacementCandidate,
+  isCodingType,
 } from "@/lib/api";
 import { useAuth } from "@/lib/AuthContext";
 import { cn } from "@/lib/utils";
@@ -451,7 +452,7 @@ export function PaperReviewPage({ examId, onBack }: { examId: string; onBack: ()
                   <Card key={q.id} className={cn(isBusy && "opacity-60")}>
                     <CardContent className="space-y-2 p-4">
                       <div className="flex items-start justify-between gap-3">
-                        <p className="text-sm text-foreground">
+                        <p className="whitespace-pre-wrap text-sm text-foreground">
                           <span className="font-semibold">{number}.</span> {q.text}
                         </p>
                         <span className="shrink-0 text-xs font-semibold text-foreground">[{q.marks}]</span>
@@ -465,7 +466,7 @@ export function PaperReviewPage({ examId, onBack }: { examId: string; onBack: ()
                           ))}
                         </ul>
                       )}
-                      {q.question_type === "code_fix" && q.starter_code && (
+                      {isCodingType(q.question_type) && q.starter_code && (
                         <pre className="overflow-x-auto rounded-md bg-slate-900 p-2.5 text-[11px] text-slate-100">
                           <code>{q.starter_code}</code>
                         </pre>

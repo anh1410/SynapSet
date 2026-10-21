@@ -19,6 +19,7 @@ from app.services.evidence import Evidence, question_evidence
 from app.services.question_usage import QuestionUsage, usage_by_question
 from app.services.duplicate_detection import find_duplicates
 from app.services.grading import AUTO_GRADABLE_TYPES, grade_answer
+from app.services.question_analysis import QuestionAnalysis, QuestionInput, analyze_question
 from app.services.question_generation import generate_questions
 
 router = APIRouter(prefix="/api/v1/questions", tags=["questions"], dependencies=[Depends(get_current_teacher)])
@@ -32,6 +33,8 @@ class GenerateQuestionsRequest(BaseModel):
     marks: int = 5
     question_type: QuestionType = QuestionType.SHORT_ANSWER
     course_outcomes: list[CourseOutcome] | None = None
+    # code_write only: frame the problem as an interview / real-world scenario.
+    scenario_based: bool = False
     check_duplicates: bool = True
     save_to_bank: bool = False
 
@@ -64,6 +67,7 @@ def generate(request: GenerateQuestionsRequest, teacher: Teacher = Depends(get_c
         marks=request.marks,
         question_type=request.question_type,
         course_outcomes=request.course_outcomes,
+        scenario_based=request.scenario_based,
     )
 
     results = []
@@ -76,6 +80,30 @@ def generate(request: GenerateQuestionsRequest, teacher: Teacher = Depends(get_c
             bank.add(q)
 
     return GenerateQuestionsResponse(results=results)
+
+
+class AnalyzeQuestionRequest(QuestionInput):
+    subject_id: str
+
+
+@router.post("/analyze", response_model=QuestionAnalysis)
+def analyze(request: AnalyzeQuestionRequest, teacher: Teacher = Depends(get_current_teacher)) -> QuestionAnalysis:
+    """Classify a question the teacher wrote: Bloom's level (+ rationale),
+    topics and course outcomes from this subject's knowledge graph, question
+    type and marks (AI); difficulty, skill and duplicates (local). For coding
+    questions, also run the reference solution against the given test cases
+    and suggest test cases (expected outputs computed by running it).
+    Nothing is saved - the teacher reviews the result and POSTs the question."""
+    require_subject(request.subject_id, teacher)
+    if not request.text.strip():
+        raise HTTPException(status_code=422, detail="Write the question first")
+    if request.question_type in (QuestionType.MCQ, QuestionType.FILL_IN_BLANK) and not request.options:
+        raise HTTPException(status_code=422, detail="Add the answer options for this question type")
+    return analyze_question(
+        QuestionInput(**request.model_dump(exclude={"subject_id"})),
+        get_graph_store(request.subject_id),
+        get_question_bank(request.subject_id).list(),
+    )
 
 
 class CheckDuplicatesRequest(BaseModel):
@@ -140,8 +168,12 @@ def list_questions(subject_id: str, teacher: Teacher = Depends(get_current_teach
 
 @router.post("", response_model=Question)
 def save_question(subject_id: str, question: Question, teacher: Teacher = Depends(get_current_teacher)) -> Question:
-    """Persist a question the user has reviewed (e.g. a generation preview they approved)."""
+    """Persist a question the user has reviewed (e.g. a generation preview they approved).
+    A question saved without a difficulty score (e.g. a teacher-written one whose
+    Bloom's level/marks/topics were edited after analysis) is scored here."""
     require_subject(subject_id, teacher)
+    if question.difficulty_score is None:
+        question.difficulty_score = score_difficulty(question, get_graph_store(subject_id)).score
     get_question_bank(subject_id).add(question)
     return question
 

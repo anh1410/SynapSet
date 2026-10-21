@@ -1,6 +1,6 @@
 # SynapSet — Development Context (handoff)
 
-_Last updated: 2026-09-29 · Branch: `stavina-student-dashboard` (on top of `stavina-student-features` @ `8ed50df`)_
+_Last updated: 2026-10-21 · Branch: `main` (all milestones merged; see §1)_
 
 SynapSet is an assessment platform: teachers upload course material, a
 knowledge graph + vector index is built from it, questions are generated with Graph-RAG
@@ -20,12 +20,14 @@ This file is the single source of context for continuing development. Read it fu
 | Teacher interface | Feature-complete for this phase (see §7) |
 | Student exam interface | **Complete for this phase** (see §9): lobby, timed attempts, autosave/resume, submit, receipt |
 | Student dashboard | **MVP complete** (see §10): student accounts, join codes/enrolment, exam list with own status, resume, results |
-| Backend tests | 209 passed, 2 skipped, 2 deselected (Gemini-backed, opt-in) |
+| Question authoring | **Complete** (see §11): teacher-written questions classified by AI; `code_write` (full program / interview scenario); grading + sandbox hardening |
+| Backend tests | 265 passed, 2 skipped, 2 deselected (Gemini-backed, opt-in) |
 | Frontend | `tsc -b --noEmit` clean, `vite build` succeeds |
-| Git | `main` (`9c95791`) → `stavina-teacher-features` (`2ea19b7`) → `stavina-student-features` (`8ed50df`) → `stavina-student-dashboard` (dashboard milestone). All pushed; each branch builds on the previous one. Nothing merged into `main`. |
+| Git | All milestones merged into `main` (fast-forward through `stavina-teacher-features`). `stavina-student-features` / `stavina-student-dashboard` remain as historical branches. |
 
-Branch commits (newest first):
-- _(stavina-student-dashboard)_ Add student dashboard and enrollment
+Commits (newest first):
+- _(question authoring)_ Add teacher question authoring, write-the-program coding questions, and grading hardening
+- `99e2587` Add student dashboard and enrollment
 - `8ed50df` _(stavina-student-features)_ Add student exam interface and attempt workflow
 - `2ea19b7` Add SynapSet developer handoff document
 - `76be0e5` Paper review/editing, blueprint & CO analysis, bank intelligence, Graph-RAG evidence, assessment analytics, topic risk, PDF export, attempt autosave
@@ -121,7 +123,8 @@ Local models  sentence-transformers all-MiniLM-L6-v2 (duplicates), XGBoost+SHAP 
 | `core/config.py` | `Settings` (pydantic-settings, `.env`) incl. thresholds (§6.8) |
 | `core/*_store.py` | JSON/pickle stores; `graph_store.course_outcome_node_ids()` |
 | `core/clock.py` | `utcnow()` |
-| `services/question_generation.py` | Graph-RAG prompt (retrieved chunks + graph relations), structured Gemini output, code_fix self-check, records `provenance` |
+| `services/question_generation.py` | Graph-RAG prompt (retrieved chunks + graph relations), structured Gemini output, coding self-check (expected outputs settled by running the reference; rejection reasons fed back into retries), interview-scenario style, records `provenance` |
+| `services/question_analysis.py` | AI classification of teacher-written questions (§11) |
 | `services/entity_extraction.py`, `document_extraction.py`, `vector_indexing.py`, `topic_dedup.py`, `document_cleanup.py` | ingestion pipeline |
 | `services/difficulty_scoring.py` | XGBoost (bootstrapped on synthetic labels) + SHAP, score 1–10 |
 | `services/duplicate_detection.py` | 0.5 semantic + 0.3 topic Jaccard + 0.2 structural; ≥0.75 = duplicate |
@@ -156,7 +159,7 @@ subjects   GET|POST /subjects · DELETE /subjects/{id}
 graph      POST /graph/ingest (multipart: subject_id, file, category, course_outcomes?)
            GET /graph/documents?subject_id · DELETE /graph/documents/{id}?subject_id
            GET /graph?subject_id · POST /graph/dedupe-topics?subject_id
-questions  POST /questions/generate · POST /questions/check-duplicates
+questions  POST /questions/generate · POST /questions/analyze (teacher-written) · POST /questions/check-duplicates
            GET|POST /questions?subject_id · DELETE /questions/{id}?subject_id · POST /questions/{id}/grade
            GET /questions/usage?subject_id · GET /questions/{id}/evidence?subject_id
 patterns   GET /patterns/presets · GET|POST /patterns · GET|PUT|DELETE /patterns/{id}
@@ -184,8 +187,8 @@ Review endpoints take the **draft** paper: `{question_ids?, marks_overrides?: {q
 ## 6. Domain rules (the non-obvious parts)
 
 ### 6.1 Questions
-Types: `mcq, fill_in_blank, short_answer, long_answer, numerical, code_fix`. Auto-gradable: mcq, fill_in_blank, numerical (case-insensitive exact match), code_fix (sandbox vs hidden test cases, partial marks by tests passed). short/long need manual grading.
-- `skill_category` (conceptual/reasoning/coding) is **derived**: code_fix → coding; Bloom ≥ Apply → reasoning; else conceptual. Optional per-question override (Bank page). `app/schemas/skill.py` + mirrored `effectiveSkill` in `api.ts`.
+Types: `mcq, fill_in_blank, short_answer, long_answer, numerical, code_fix, code_write`. Auto-gradable: mcq, fill_in_blank (case-insensitive exact match), numerical (exact match **or equal as numbers**: "4.0" = "4"), code_fix / code_write (sandbox vs hidden test cases; partial marks = tests passed / total, rounded half up, never full marks unless every test passes; output compared ignoring trailing spaces and line-ending style). short/long need manual grading. `CODING_TYPES` in `app/schemas/question.py`.
+- `skill_category` (conceptual/reasoning/coding) is **derived**: coding types → coding; Bloom ≥ Apply → reasoning; else conceptual. Optional per-question override (Bank page). `app/schemas/skill.py` + mirrored `effectiveSkill` in `api.ts`.
 - `difficulty_bucket`: ≤4 easy, ≤7 medium, else hard (unscored = medium). Same thresholds front and back.
 - `provenance` (generated questions): requested topic, retrieved chunks (+relevance), graph relations, model, time. `derived_from`: copy made when marks were edited for one paper.
 
@@ -340,7 +343,29 @@ Nothing about the exam-link flow changed for anonymous students (no token → ex
 
 ---
 
-## 11. Known limitations / tech debt
+## 11. Question authoring & coding questions (completed)
+
+### 11.1 Teacher-written questions (Question Bank → "Add your own question")
+- `src/components/ManualQuestionDialog.tsx` → `POST /questions/analyze` (`app/services/question_analysis.py`) → teacher reviews/edits → `POST /questions` with `origin: "manual"`.
+- Gemini returns Bloom's level + one-line rationale, topic names and CO codes (constrained to the subject's graph; unknown names dropped; ≤ 3 topics), question type (if "Let the AI decide") and marks. Difficulty (XGBoost), skill and duplicates are local.
+- Coding: the reference solution is run against the teacher's test cases (`code_check`); AI proposes test **inputs** and expected outputs come from running the reference (`suggested_test_cases`).
+- If Gemini fails for any reason → keyword heuristic (`method: "heuristic"` + note).
+- Dialog validation: ≥ 2 distinct options with a non-blank correct one; numeric answer for numerical; for coding a reference solution + ≥ 1 test, the code/tests must match what was last checked (else "re-analyse"), and the check must pass. If the teacher changes Bloom's/marks/topics/type after analysis, `difficulty_score` is sent as null and the server scores it on save.
+
+### 11.2 `code_write` — Coding (Write the Program)
+- Students write the whole program (optional `starter_code` template), auto-graded by hidden `test_cases`. `scenario_based` = interview / real-world problem framing (generation `SCENARIO_INSTRUCTION`, badge everywhere, kept on Paper Review regenerate).
+- Integrated in: Exam Builder (style picker), Bank (badges/filter), patterns/presets/import, student `QuestionCard` (empty editor + sandbox hint), Answer Key (reference + hidden tests table), Paper Review, Results (monospace code, partial-credit icon), PDF export, analytics (coding skill).
+
+### 11.3 Sandbox (`app/services/code_sandbox.py`)
+- Import allowlist, banned calls, banned names (`os`, `sys`, `open`, `eval`, ...) checked on code **outside** string literals/comments, and introspection attributes blocked (`__class__`, `__subclasses__`, `__globals__`, frame attributes, ...) to close the `().__class__.__base__.__subclasses__()` escape. `__name__` is "builtins" in the sandbox, so `if __name__ == "__main__":` code never runs (prompts tell the model).
+- `normalize_output` / `outputs_match` are the one place outputs are compared.
+
+### 11.4 Tests
+`tests/test_question_authoring.py` (analysis mapping/fallback/duplicates/validation/isolation, code checks, code_write grading/exam/PDF, generation scenario/feedback/settling) and `tests/test_authoring_hardening.py` (sandbox escapes vs. legitimate code, output normalisation, numeric answers, partial marks, regenerate style, evidence note, difficulty on save).
+
+---
+
+## 12. Known limitations / tech debt
 - `requirements.txt` pins broken (see §2) — fix pending.
 - Single-process JSON stores; no DB, no migrations, no concurrency safety.
 - Exam passwords stored/compared in plaintext; `jwt_secret` defaults to a dev value.
@@ -359,10 +384,12 @@ Student exam interface:
 - The exam password sits in the tab's sessionStorage during an attempt (the server re-checks it on submit); cleared when the exam ends. The receipt stays in sessionStorage for the tab's lifetime (a second student using the same tab would see it).
 - `GET /timing` doesn't return the exam name, so the lobby can't show it until the attempt starts.
 - `PublicQuestion` still includes `bloom_level`.
-- Grading is exact-match for numerical/fill-in-the-blank ("4.0" ≠ "4") — backend rule, not a UI one.
+- Fill-in-the-blank / MCQ grading is case-insensitive exact match (numerical compares as numbers).
+- Sandbox has no memory/CPU cap beyond the 5 s per-test timeout; Python only. Existing bank questions can't be edited from the UI.
+- The first AI analysis after a backend restart is slow (~40 s) while local models load.
 - Code editor is a plain textarea (no syntax highlighting); Tab is captured for indentation (Shift+Tab still leaves the field).
 - Time-up submit relies on the tab being open; otherwise lazy finalisation submits autosaved answers when the exam is next read. Browsers throttle timers in hidden tabs, so countdowns / time-up submit can run late while hidden (the page catches up when visible; the server finalises regardless).
-- No frontend unit tests; student UI verified by manual browser E2E (§9.8, §10.9).
+- No frontend unit tests; student UI verified by manual browser E2E (§9.8, §10.9, §11.4).
 
 Student dashboard:
 - Roll numbers are claimed first-come: whoever registers a roll number first owns that exam identity (and can resume/claim an unlinked link attempt for it). No roster/verification against a school list, no email verification.
@@ -377,8 +404,8 @@ Student dashboard:
 
 ---
 
-## 12. Working rules for this repo
-- Branches: teacher milestone `stavina-teacher-features`, student exam interface `stavina-student-features`, student dashboard `stavina-student-dashboard` (each on top of the previous). **Never** checkout/modify/merge `main`; **never push** unless the user explicitly asks.
+## 13. Working rules for this repo
+- All milestones are merged into `main`. **Never push** (or merge into `main`) unless the user explicitly asks; never force-push.
 - For browser E2E, run a separate backend with the store env vars (§8) pointed at a scratch directory rather than using `data/`.
 - Never modify `.env` or print the Gemini key. Never commit `data/`, `.venv/`, `node_modules/`, `dist/`, `.env` (all gitignored — keep it that way).
 - Remove any test data created during manual/E2E testing before committing; leave the real teacher accounts untouched (local `data/` holds real teacher accounts alongside any throwaway test account; delete only what your test run created).

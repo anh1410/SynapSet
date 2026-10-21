@@ -4,7 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import type { PublicQuestion, QuestionType } from "@/lib/api";
+import { isCodingType, type PublicQuestion, type QuestionType } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const STUDENT_TYPE_LABELS: Record<QuestionType, string> = {
@@ -14,7 +14,11 @@ const STUDENT_TYPE_LABELS: Record<QuestionType, string> = {
   long_answer: "Long answer",
   numerical: "Numerical",
   code_fix: "Fix the code",
+  code_write: "Write the program",
 };
+
+// Mirrors ALLOWED_IMPORTS in app/services/code_sandbox.py.
+const CODE_IMPORTS = "math, random, string, itertools, collections, functools, re, json, datetime";
 
 const textareaClass = cn(
   "w-full rounded-lg border border-input bg-white px-3 py-2 text-sm shadow-subtle transition-all duration-200",
@@ -25,7 +29,7 @@ const textareaClass = cn(
 /** Answered = something meaningful was entered (unchanged starter code doesn't count). */
 export function isAnswered(q: PublicQuestion, answer: string | undefined): boolean {
   if (!answer || !answer.trim()) return false;
-  return !(q.question_type === "code_fix" && q.starter_code != null && answer === q.starter_code);
+  return !(isCodingType(q.question_type) && q.starter_code != null && answer === q.starter_code);
 }
 
 /** Tab inserts spaces in the code editor instead of leaving the field. */
@@ -95,6 +99,7 @@ export function QuestionCard({
           <div className="flex items-center gap-2">
             <span className="text-sm font-semibold text-foreground">Question {index + 1}</span>
             <Badge variant="secondary">{STUDENT_TYPE_LABELS[q.question_type]}</Badge>
+            {q.scenario_based && <Badge variant="accent">Interview scenario</Badge>}
           </div>
           <div className="flex items-center gap-2">
             {answered ? <Badge variant="success">Answered</Badge> : <Badge variant="outline">Not answered</Badge>}
@@ -123,7 +128,7 @@ export function QuestionCard({
               onChange={(e) => onChange(e.target.value)}
             />
           </div>
-        ) : q.question_type === "code_fix" ? (
+        ) : isCodingType(q.question_type) ? (
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <label htmlFor={inputId} className="text-xs font-medium text-muted-foreground">
@@ -144,9 +149,15 @@ export function QuestionCard({
               autoCorrect="off"
               rows={Math.min(24, Math.max(8, codeValue.split("\n").length + 2))}
               className={cn(textareaClass, "font-mono text-[13px] leading-5")}
+              placeholder={q.question_type === "code_write" ? "# Write your complete program here.\n# Read input with input() and print the result with print()." : undefined}
               onKeyDown={(e) => handleCodeTab(e, onChange)}
               onChange={(e) => onChange(e.target.value)}
             />
+            <p className="text-[11px] text-muted-foreground">
+              Your program is run on hidden test cases. Read input with <code className="font-mono">input()</code> and print the answer with{" "}
+              <code className="font-mono">print()</code>. Allowed imports: {CODE_IMPORTS}. Files, <code className="font-mono">sys</code> and{" "}
+              <code className="font-mono">os</code> aren't available.
+            </p>
           </div>
         ) : (
           <div className="space-y-1">

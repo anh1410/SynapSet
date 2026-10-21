@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Search, Trash2, Library, ArrowRight, FileSearch } from "lucide-react";
+import { Search, Trash2, Library, ArrowRight, FileSearch, PenLine } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import { EvidenceDialog } from "@/components/EvidenceDialog";
+import { ManualQuestionDialog } from "@/components/ManualQuestionDialog";
 import {
   BLOOM_LABELS,
   BLOOM_LEVELS,
@@ -48,6 +49,8 @@ export function BankPage({
   const { activeSubjectId } = useAuth();
   const [questions, setQuestions] = useState<Question[]>([]);
   const [topics, setTopics] = useState<GraphNode[]>([]);
+  const [outcomes, setOutcomes] = useState<GraphNode[]>([]);
+  const [authoring, setAuthoring] = useState(false);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState(initialSearch ?? "");
   const [topicFilter, setTopicFilter] = useState("all");
@@ -70,7 +73,10 @@ export function BankPage({
     setSelected([]);
     Promise.all([
       fetchQuestions(activeSubjectId).then(setQuestions),
-      fetchGraph(activeSubjectId).then((g) => setTopics(topicNodes(g.nodes))),
+      fetchGraph(activeSubjectId).then((g) => {
+        setTopics(topicNodes(g.nodes));
+        setOutcomes(g.nodes.filter((n) => n.is_course_outcome));
+      }),
       fetchQuestionUsage(activeSubjectId).then(setBankUsage).catch(() => setBankUsage(null)),
     ]).finally(() => setLoading(false));
   }, [activeSubjectId]);
@@ -132,6 +138,14 @@ export function BankPage({
 
   return (
     <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-xs text-muted-foreground">
+          Generated questions land here automatically. You can also write your own - the AI classifies them.
+        </p>
+        <Button size="sm" onClick={() => setAuthoring(true)} disabled={!activeSubjectId}>
+          <PenLine className="h-3.5 w-3.5" /> Add your own question
+        </Button>
+      </div>
       <Card>
         <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center">
           <div className="relative flex-1">
@@ -215,7 +229,7 @@ export function BankPage({
             <EmptyState
               icon={Library}
               title="No questions yet"
-              description="Generate questions from your uploaded material to build your bank."
+              description="Generate questions from your uploaded material, or add your own with the button above."
               className="m-6"
             />
           ) : filtered.length === 0 ? (
@@ -257,7 +271,11 @@ export function BankPage({
                         </td>
                         <td className="max-w-md px-2 py-3">
                           <p className="line-clamp-2 text-foreground">{q.text}</p>
-                          <p className="mt-0.5 text-[11px] text-muted-foreground">{QUESTION_TYPE_LABELS[q.question_type]}</p>
+                          <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                            {QUESTION_TYPE_LABELS[q.question_type]}
+                            {q.scenario_based && <Badge variant="default">Interview scenario</Badge>}
+                            {q.origin === "manual" && <Badge variant="secondary">Teacher-written</Badge>}
+                          </p>
                         </td>
                         <td className="px-4 py-3 text-muted-foreground">
                           {q.topic_ids.length > 0 ? q.topic_ids.map(topicName).join(", ") : "—"}
@@ -342,6 +360,17 @@ export function BankPage({
         Showing {filtered.length} of {questions.length} questions
       </p>
       {activeSubjectId && <EvidenceDialog subjectId={activeSubjectId} question={evidenceFor} onClose={() => setEvidenceFor(null)} />}
+      {activeSubjectId && (
+        <ManualQuestionDialog
+          open={authoring}
+          onClose={() => setAuthoring(false)}
+          subjectId={activeSubjectId}
+          topics={topics}
+          outcomes={outcomes}
+          bank={questions}
+          onSaved={(q) => setQuestions((qs) => [q, ...qs])}
+        />
+      )}
     </div>
   );
 }

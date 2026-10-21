@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.schemas.exam import Exam
 from app.schemas.exam_pattern import ExamPattern
-from app.schemas.question import Question, QuestionType
+from app.schemas.question import CODING_TYPES, Question, QuestionType
 from app.services.blueprint import Blueprint
 from app.services.pattern_assembly import DistributionRow
 from app.services.pdf_writer import PdfDocument
@@ -68,6 +68,8 @@ def render_paper(exam: Exam, questions: list[Question], blueprint: Blueprint, pa
     general = ["Answer all questions unless a section says otherwise.", "Marks for each question are shown in brackets."]
     if any(q.question_type == QuestionType.CODE_FIX for q in questions):
         general.append("Programming questions: correct the given code so it produces the expected output.")
+    if any(q.question_type == QuestionType.CODE_WRITE for q in questions):
+        general.append("Write-the-program questions: write a complete program that reads the input and prints the output as described.")
     for line in general:
         doc.paragraph(f"- {line}", size=9.5, indent=8, gap_after=1)
 
@@ -86,7 +88,7 @@ def render_paper(exam: Exam, questions: list[Question], blueprint: Blueprint, pa
             if q.question_type in _OBJECTIVE and q.options:
                 for i, opt in enumerate(q.options):
                     doc.paragraph(f"({chr(97 + i)})  {opt}", size=10, indent=22, gap_after=1)
-            if q.question_type == QuestionType.CODE_FIX and q.starter_code:
+            if q.question_type in CODING_TYPES and q.starter_code:
                 doc.code(q.starter_code)
             doc.space(6)
     doc.rule()
@@ -108,7 +110,7 @@ def render_answer_key(exam: Exam, questions: list[Question], blueprint: Blueprin
             if q.question_type in _OBJECTIVE and q.options and q.correct_answer in q.options:
                 letter = chr(97 + q.options.index(q.correct_answer))
                 doc.paragraph(f"Answer: ({letter}) {q.correct_answer}", font="bold", size=10, indent=22)
-            elif q.question_type == QuestionType.CODE_FIX:
+            elif q.question_type in CODING_TYPES:
                 doc.paragraph("Reference solution:", font="bold", size=10, indent=22, gap_after=1)
                 doc.code(q.correct_answer or "(none recorded)", indent=22)
                 if q.test_cases:

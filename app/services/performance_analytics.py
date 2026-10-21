@@ -262,7 +262,7 @@ def _fact(student: str, exam_id: str, answer: GradedAnswer, question: Question |
     topics = answer.topic_ids if answer.topic_ids is not None else (question.topic_ids if question else [])
     override = answer.skill_category or (question.skill_category if question else None)
     qtype = answer.question_type.value
-    if bloom is not None or override or qtype == "code_fix":
+    if bloom is not None or override or qtype in ("code_fix", "code_write"):
         skill = resolve_skill_category(qtype, bloom or 0, override)
     else:
         skill = None
@@ -274,7 +274,7 @@ def _fact(student: str, exam_id: str, answer: GradedAnswer, question: Question |
         difficulty = None
 
     passed, total = answer.test_cases_passed, answer.test_cases_total
-    if qtype == "code_fix" and total is None and answer.auto_graded:
+    if qtype in ("code_fix", "code_write") and total is None and answer.auto_graded:
         match = _TESTS_RE.search(answer.detail or "")
         if match:
             passed, total = int(match.group(1)), int(match.group(2))

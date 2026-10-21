@@ -9,6 +9,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import {
   ASSESSMENT_TYPE_LABELS,
   QUESTION_TYPE_LABELS,
+  isCodingType,
   SKILL_LABELS,
   getExam,
   getExamAttempts,
@@ -239,10 +240,14 @@ export function ExamResultsPage({ examId, onBack }: { examId: string; onBack: ()
                       <div className="space-y-2 bg-secondary/20 px-4 pb-4">
                         {sub.answers.map((a) => {
                           const pending = !a.auto_graded && !a.manually_graded;
+                          // Hidden-test grading can award part of the marks (e.g. 2 of 3 tests passed).
+                          const partial = !pending && a.correct === false && a.marks_awarded > 0 && a.marks_awarded < a.max_marks;
                           return (
                             <div key={a.question_id} className="flex items-start gap-2 rounded-lg border border-border bg-white p-2.5">
                               {pending ? (
                                 <HelpCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" aria-label="Needs grading" />
+                              ) : partial ? (
+                                <CircleDot className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" aria-label="Partial credit" />
                               ) : a.correct === true ? (
                                 <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-success" aria-label="Correct" />
                               ) : a.correct === false ? (
@@ -253,7 +258,12 @@ export function ExamResultsPage({ examId, onBack }: { examId: string; onBack: ()
                               <div className="min-w-0 flex-1">
                                 <p className="line-clamp-2 text-xs text-foreground">{questionText(a.question_id)}</p>
                                 {a.answer != null && a.answer !== "" && (
-                                  <pre className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-secondary/50 p-2 font-sans text-[11px] text-foreground">
+                                  <pre
+                                    className={cn(
+                                      "mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-secondary/50 p-2 text-[11px] text-foreground",
+                                      isCodingType(a.question_type) ? "font-mono" : "font-sans"
+                                    )}
+                                  >
                                     {a.answer}
                                   </pre>
                                 )}

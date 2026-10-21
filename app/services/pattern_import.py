@@ -35,7 +35,7 @@ questions the paper contains in that section, marks_per_question the marks for e
 says "answer any N of M", use N (the questions a student actually answers) and mention the choice in \
 instructions.
 - question_types: only from {question_types}. Map objective/multiple-choice to "mcq", fill-in-the-blanks to \
-"fill_in_blank", programming questions to "code_fix", brief answers to "short_answer", essays/descriptive \
+"fill_in_blank", programming questions to "code_fix" (fix/complete given code) or "code_write" (write the whole program), brief answers to "short_answer", essays/descriptive \
 answers to "long_answer", problems with a numeric answer to "numerical". Leave empty if the document doesn't say.
 - bloom_levels / bloom_distribution: only if the document states Bloom's / RBT levels (L1=REMEMBER, \
 L2=UNDERSTAND, L3=APPLY, L4=ANALYZE, L5=EVALUATE, L6=CREATE). Percent is the share of total marks.

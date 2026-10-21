@@ -46,6 +46,7 @@ import {
   type GraphNode,
   type Question,
   type QuestionType,
+  isCodingType,
 } from "@/lib/api";
 import { useAuth } from "@/lib/AuthContext";
 import { cn } from "@/lib/utils";
@@ -57,6 +58,8 @@ interface BuilderRow {
   questionType: QuestionType;
   bloomLevel: BloomLevel;
   marks: number;
+  /** code_write only: frame it as an interview / real-world scenario. */
+  scenario: boolean;
   question?: Question;
   error?: string;
 }
@@ -72,6 +75,7 @@ function makeRow(topics: GraphNode[]): BuilderRow {
     questionType: "short_answer",
     bloomLevel: 2,
     marks: 5,
+    scenario: false,
   };
 }
 
@@ -92,6 +96,7 @@ function rowFromQuestion(q: Question): BuilderRow {
     questionType: q.question_type,
     bloomLevel: q.bloom_level,
     marks: q.marks,
+    scenario: Boolean(q.scenario_based),
     question: q,
   };
 }
@@ -211,6 +216,7 @@ export function ExamBuilderPage({
         bloom_level: row.bloomLevel,
         marks: row.marks,
         question_type: row.questionType,
+        scenario_based: row.questionType === "code_write" && row.scenario,
         check_duplicates: true,
         save_to_bank: true,
       });
@@ -493,6 +499,7 @@ export function ExamBuilderPage({
                     <p className="line-clamp-2 text-xs text-foreground">{row.question.text}</p>
                     <div className="flex flex-wrap gap-1.5">
                       <Badge variant="outline">{QUESTION_TYPE_LABELS[row.question.question_type]}</Badge>
+                      {row.question.scenario_based && <Badge variant="default">Interview scenario</Badge>}
                       <Badge variant="outline">{row.question.marks} marks</Badge>
                       <Badge variant="accent">{BLOOM_LABELS[row.question.bloom_level]}</Badge>
                     </div>
@@ -535,6 +542,16 @@ export function ExamBuilderPage({
                         ))}
                       </Select>
                     </div>
+                    {row.questionType === "code_write" && (
+                      <Select
+                        value={row.scenario ? "scenario" : "scratch"}
+                        onChange={(e) => updateRow(row.rowId, "scenario", e.target.value === "scenario")}
+                        aria-label="Coding question style"
+                      >
+                        <option value="scratch">Write the full program from scratch</option>
+                        <option value="scenario">Interview / real-world scenario problem</option>
+                      </Select>
+                    )}
                     <Input
                       type="number"
                       min={1}
@@ -630,11 +647,11 @@ export function ExamBuilderPage({
                 <Card key={row.rowId}>
                   <CardContent className="space-y-2 p-4">
                     <div className="flex items-start justify-between gap-3">
-                      <p className="text-sm text-foreground">
+                      <p className="whitespace-pre-wrap text-sm text-foreground">
                         {idx + 1}. {q.text}
                       </p>
                     </div>
-                    {q.question_type === "code_fix" && q.starter_code && (
+                    {isCodingType(q.question_type) && q.starter_code && (
                       <pre className="overflow-x-auto rounded-md bg-slate-900 p-3 text-xs text-slate-100">
                         <code>{q.starter_code}</code>
                       </pre>
@@ -654,9 +671,9 @@ export function ExamBuilderPage({
                     {showAnswerKey && q.correct_answer && (
                       <div className="rounded-md border border-success/30 bg-success/[0.04] p-2.5">
                         <p className="text-[11px] font-semibold text-success">
-                          {q.question_type === "code_fix" ? "Reference Solution" : "Answer"}
+                          {isCodingType(q.question_type) ? "Reference Solution" : "Answer"}
                         </p>
-                        {q.question_type === "code_fix" ? (
+                        {isCodingType(q.question_type) ? (
                           <pre className="mt-1 overflow-x-auto rounded-md bg-slate-900 p-3 text-xs text-slate-100">
                             <code>{q.correct_answer}</code>
                           </pre>
@@ -669,6 +686,7 @@ export function ExamBuilderPage({
                       {pattern &&
                         (sectionOf(q.id) ? <Badge variant="default">{sectionOf(q.id)}</Badge> : <Badge variant="warning">No section fits</Badge>)}
                       <Badge variant="outline">{QUESTION_TYPE_LABELS[q.question_type]}</Badge>
+                      {q.scenario_based && <Badge variant="default">Interview scenario</Badge>}
                       <Badge variant="outline">{SKILL_LABELS[effectiveSkill(q)]}</Badge>
                       <Badge variant="outline">{topicName(row.topicId)}</Badge>
                       <Badge variant="outline">{q.marks} marks</Badge>

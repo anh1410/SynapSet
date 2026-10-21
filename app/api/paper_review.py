@@ -190,6 +190,7 @@ def regenerate(exam_id: str, request: RegenerateRequest, teacher: Teacher = Depe
             drafts = generate_questions(
                 topic=topic, graph_store=graph_store, subject_id=exam.subject_id, num_questions=1,
                 bloom_level=c.bloom_level, marks=c.marks, question_type=c.question_type,
+                scenario_based=target.scenario_based,  # keep an interview-style question interview-style
             )
         except Exception as exc:
             raise HTTPException(status_code=502, detail=f"Question generation failed ({type(exc).__name__})") from exc

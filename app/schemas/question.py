@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -14,10 +15,15 @@ class QuestionType(str, Enum):
     NUMERICAL = "numerical"
     FILL_IN_BLANK = "fill_in_blank"  # blank-style stem, graded like MCQ via options/correct_answer
     CODE_FIX = "code_fix"  # correct the code / find the mistake / fill the missing line
+    CODE_WRITE = "code_write"  # write the whole program (from scratch, or an interview-style scenario)
+
+
+# Programming questions: answered with code, auto-graded by running it against hidden test cases.
+CODING_TYPES = frozenset({QuestionType.CODE_FIX, QuestionType.CODE_WRITE})
 
 
 class CodeTestCase(BaseModel):
-    """One hidden input/expected-output pair used to auto-grade a code_fix answer."""
+    """One hidden input/expected-output pair used to auto-grade a coding answer."""
 
     input: str = ""
     expected_output: str
@@ -55,11 +61,20 @@ class Question(BaseModel):
     unit: int | None = None
 
     options: list[str] | None = None  # MCQ / fill_in_blank choices
-    correct_answer: str | None = None  # MCQ/fill_in_blank correct option, or reference-corrected code for code_fix
+    correct_answer: str | None = None  # MCQ/fill_in_blank correct option, or the reference solution for coding types
 
-    code_language: str | None = None  # code_fix only, e.g. "python"
-    starter_code: str | None = None  # code_fix only: the buggy/incomplete code shown to the student
-    test_cases: list[CodeTestCase] | None = None  # code_fix only: hidden cases used to auto-grade submissions
+    code_language: str | None = None  # coding types only, e.g. "python"
+    # code_fix: the buggy/incomplete code shown to the student. code_write: an
+    # optional template (e.g. input-reading skeleton); usually empty.
+    starter_code: str | None = None
+    test_cases: list[CodeTestCase] | None = None  # coding types: hidden cases used to auto-grade submissions
+    # code_write only: framed as a real-world / company-interview scenario
+    # rather than a plain "write a program that..." task.
+    scenario_based: bool = False
+
+    # How the question entered the bank: "generated" by the AI pipeline or
+    # "manual" (written by the teacher, classified by AI). None = older questions.
+    origin: Literal["generated", "manual"] | None = None
 
     difficulty_score: float | None = None  # 1-10, set by difficulty scorer (Phase 5)
     embedding_id: str | None = None  # reference into the vector store

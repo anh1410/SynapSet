@@ -37,6 +37,7 @@ _TYPE_LABELS = {
     "long_answer": "Long Answer",
     "numerical": "Numerical",
     "code_fix": "Coding (Fix the Code)",
+    "code_write": "Coding (Write the Program)",
 }
 _SKILL_LABELS = {"conceptual": "Conceptual", "reasoning": "Reasoning", "coding": "Coding"}
 _DIFFICULTY_LABELS = {"easy": "Easy", "medium": "Medium", "hard": "Hard"}

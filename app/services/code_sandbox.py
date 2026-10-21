@@ -14,6 +14,7 @@ import io
 import multiprocessing
 import re
 import sys
+import tokenize
 
 ALLOWED_IMPORTS = {"math", "random", "string", "itertools", "collections", "functools", "re", "json", "datetime"}
 _DANGEROUS_TOKENS = re.compile(
@@ -33,8 +34,38 @@ _SAFE_BUILTINS = [
 ]
 
 
+# Attribute names used to climb from an ordinary object to the interpreter's
+# internals (`().__class__.__base__.__subclasses__()` -> a class whose module
+# globals hold the real builtins). Blocking these attributes closes the classic
+# Python sandbox escape. Everyday dunders students use in classes
+# (__init__, __str__, super().__init__(), type(x).__name__, ...) stay allowed.
+_BLOCKED_ATTRIBUTES = {
+    "__class__", "__base__", "__bases__", "__mro__", "__subclasses__", "__globals__", "__builtins__",
+    "__dict__", "__code__", "__closure__", "__func__", "__self__", "__getattribute__", "__reduce__",
+    "__reduce_ex__", "__loader__", "__spec__", "__import__", "__traceback__", "__init_subclass__",
+    "__subclasshook__", "__getattr__", "__delattr__", "__setattr__", "__weakref__", "__objclass__",
+    "f_globals", "f_locals", "f_builtins", "f_back", "f_code", "tb_frame", "tb_next",
+    "gi_frame", "gi_code", "cr_frame", "cr_code", "ag_frame", "co_code",
+}
+
+
 class UnsafeCodeError(Exception):
     pass
+
+
+def _code_outside_strings(source: str) -> str:
+    """The source with string literals and comments removed, so the banned-name
+    check below looks only at code. A program that prints "The shop is open"
+    must not be rejected for the word "open"; calls and imports are checked
+    on the AST anyway."""
+    skip = {tokenize.STRING, tokenize.COMMENT}
+    if hasattr(tokenize, "FSTRING_MIDDLE"):  # literal text inside f-strings (3.12+)
+        skip.add(tokenize.FSTRING_MIDDLE)
+    try:
+        tokens = tokenize.generate_tokens(io.StringIO(source).readline)
+        return " ".join(tok.string for tok in tokens if tok.type not in skip)
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        return source  # be conservative: check everything
 
 
 class CodeTimeoutError(Exception):
@@ -43,9 +74,11 @@ class CodeTimeoutError(Exception):
 
 def check_code_safety(source: str) -> None:
     """Raises UnsafeCodeError if `source` imports anything outside
-    ALLOWED_IMPORTS, calls a code-execution/file/system primitive, or even
-    mentions a dangerous module name (belt-and-suspenders against
-    `import os as x`-style obfuscation)."""
+    ALLOWED_IMPORTS, calls a code-execution/file/system primitive, touches an
+    introspection attribute (_BLOCKED_ATTRIBUTES), or mentions a dangerous
+    module/function name in its code (belt-and-suspenders against
+    `import os as x`-style obfuscation; string literals and comments are
+    ignored for that last check)."""
     try:
         tree = ast.parse(source)
     except SyntaxError as exc:
@@ -64,9 +97,27 @@ def check_code_safety(source: str) -> None:
             name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
             if name in {"eval", "exec", "compile", "__import__", "open", "globals", "locals", "vars"}:
                 raise UnsafeCodeError(f"Call not allowed: {name}")
+        elif isinstance(node, ast.Attribute) and node.attr in _BLOCKED_ATTRIBUTES:
+            raise UnsafeCodeError(f"Attribute not allowed: {node.attr}")
+        elif isinstance(node, ast.Name) and node.id in _BLOCKED_ATTRIBUTES:
+            raise UnsafeCodeError(f"Name not allowed: {node.id}")
 
-    if _DANGEROUS_TOKENS.search(source):
+    if _DANGEROUS_TOKENS.search(_code_outside_strings(source)):
         raise UnsafeCodeError("Code references a disallowed module or function name")
+
+
+def normalize_output(text: str) -> str:
+    """Program output as graders compare it: any line-ending style, no
+    trailing spaces on a line, no leading/trailing blank space overall."""
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    return "\n".join(line.rstrip() for line in lines).strip()
+
+
+def outputs_match(actual: str, expected: str) -> bool:
+    """Whether a program's printed output matches a test case's expected
+    output. Whitespace at line ends and Windows line endings don't count -
+    `print(x, end=" ")` style trailing spaces shouldn't cost marks."""
+    return normalize_output(actual) == normalize_output(expected)
 
 
 def _safe_import(name, *args, **kwargs):

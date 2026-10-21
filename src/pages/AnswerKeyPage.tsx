@@ -4,7 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { BLOOM_LABELS, QUESTION_TYPE_LABELS, getExam, type Exam, type Question } from "@/lib/api";
+import { BLOOM_LABELS, QUESTION_TYPE_LABELS, getExam, type Exam, type Question, isCodingType } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 export function AnswerKeyPage({ examId, onBack }: { examId: string; onBack: () => void }) {
@@ -51,10 +51,10 @@ export function AnswerKeyPage({ examId, onBack }: { examId: string; onBack: () =
         {questions.map((q, idx) => (
           <Card key={q.id}>
             <CardContent className="space-y-2 p-4">
-              <p className="text-sm text-foreground">
+              <p className="whitespace-pre-wrap text-sm text-foreground">
                 {idx + 1}. {q.text}
               </p>
-              {q.question_type === "code_fix" && q.starter_code && (
+              {isCodingType(q.question_type) && q.starter_code && (
                 <>
                   <p className="text-[11px] font-semibold text-muted-foreground">Starter Code</p>
                   <pre className="overflow-x-auto rounded-md bg-slate-900 p-3 text-xs text-slate-100">
@@ -74,9 +74,9 @@ export function AnswerKeyPage({ examId, onBack }: { examId: string; onBack: () =
               {q.correct_answer && (
                 <div className="rounded-md border border-success/30 bg-success/[0.04] p-2.5">
                   <p className="text-[11px] font-semibold text-success">
-                    {q.question_type === "code_fix" ? "Reference Solution" : "Answer"}
+                    {isCodingType(q.question_type) ? "Reference Solution" : "Answer"}
                   </p>
-                  {q.question_type === "code_fix" ? (
+                  {isCodingType(q.question_type) ? (
                     <pre className="mt-1 overflow-x-auto rounded-md bg-slate-900 p-3 text-xs text-slate-100">
                       <code>{q.correct_answer}</code>
                     </pre>
@@ -85,8 +85,33 @@ export function AnswerKeyPage({ examId, onBack }: { examId: string; onBack: () =
                   )}
                 </div>
               )}
+              {isCodingType(q.question_type) && q.test_cases && q.test_cases.length > 0 && (
+                <div className="rounded-md border border-border p-2.5">
+                  <p className="text-[11px] font-semibold text-muted-foreground">
+                    Hidden test cases ({q.test_cases.length}) - students never see these
+                  </p>
+                  <table className="mt-1.5 w-full text-left font-mono text-[11px]">
+                    <thead className="text-muted-foreground">
+                      <tr>
+                        <th className="w-1/2 pb-1 font-medium">Input</th>
+                        <th className="pb-1 font-medium">Expected output</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {q.test_cases.map((t, ti) => (
+                        <tr key={ti} className="border-t border-border align-top">
+                          <td className="whitespace-pre-wrap py-1 pr-2">{t.input || "(no input)"}</td>
+                          <td className="whitespace-pre-wrap py-1">{t.expected_output}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
               <div className="flex flex-wrap gap-1.5">
                 <Badge variant="outline">{QUESTION_TYPE_LABELS[q.question_type]}</Badge>
+                {q.scenario_based && <Badge variant="default">Interview scenario</Badge>}
+                {q.origin === "manual" && <Badge variant="secondary">Teacher-written</Badge>}
                 <Badge variant="outline">{q.marks} marks</Badge>
                 <Badge variant="accent">{BLOOM_LABELS[q.bloom_level]}</Badge>
               </div>
