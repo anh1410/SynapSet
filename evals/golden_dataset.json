@@ -1,0 +1,236 @@
+[
+  {
+    "id": "cloud-virtualization",
+    "topic": "Virtualization",
+    "bloom_level": "UNDERSTAND",
+    "question_type": "short_answer",
+    "marks": 5,
+    "prerequisites": [],
+    "syllabus": "Virtualization is the technique of creating a virtual version of a physical resource such as a server, storage device, or network. A software layer called a hypervisor sits between the hardware and the virtual machines (VMs) and allocates CPU, memory, and storage to each VM. Each VM runs its own guest operating system and is isolated from the others, so a crash in one VM does not affect the rest. Virtualization improves hardware utilization, because many VMs can share one physical server, and it makes it easier to migrate, back up, and scale workloads. It is the foundation of cloud computing."
+  },
+  {
+    "id": "cloud-hypervisor-types",
+    "topic": "Hypervisor Types",
+    "bloom_level": "REMEMBER",
+    "question_type": "mcq",
+    "marks": 1,
+    "prerequisites": ["Virtualization"],
+    "syllabus": "Hypervisors are classified into two types. A Type 1 hypervisor, also called bare-metal, runs directly on the host hardware without an underlying operating system; examples are VMware ESXi, Microsoft Hyper-V, and Xen. It offers better performance and is used in data centres. A Type 2 hypervisor, also called hosted, runs as an application on top of a conventional operating system; examples are Oracle VirtualBox and VMware Workstation. It is easier to install and is mainly used on desktops for development and testing, but it adds overhead because requests pass through the host operating system."
+  },
+  {
+    "id": "cloud-service-models",
+    "topic": "Cloud Service Models",
+    "bloom_level": "ANALYZE",
+    "question_type": "long_answer",
+    "marks": 10,
+    "prerequisites": ["Virtualization"],
+    "syllabus": "Cloud services are offered in three main models. In Infrastructure as a Service (IaaS), the provider supplies virtualized compute, storage, and networking, and the customer manages the operating system, middleware, and applications; Amazon EC2 is an example. In Platform as a Service (PaaS), the provider also manages the operating system and runtime, and the customer deploys only application code and data; Google App Engine is an example. In Software as a Service (SaaS), the provider manages everything and the customer simply uses the finished application over the internet; Gmail and Salesforce are examples. Moving from IaaS to SaaS, the customer's control decreases while convenience increases."
+  },
+  {
+    "id": "cloud-deployment-models",
+    "topic": "Cloud Deployment Models",
+    "bloom_level": "EVALUATE",
+    "question_type": "short_answer",
+    "marks": 5,
+    "prerequisites": ["Cloud Service Models"],
+    "syllabus": "Cloud deployment models describe who owns and can access the infrastructure. A public cloud is owned by a provider and shared by many customers over the internet; it is cost-effective and scales quickly but offers less control. A private cloud is dedicated to a single organization, hosted on-premises or by a third party, and gives greater security and control at higher cost. A hybrid cloud combines public and private clouds, letting sensitive data stay private while bursty workloads run in the public cloud. A community cloud is shared by several organizations with common concerns, such as compliance requirements."
+  },
+  {
+    "id": "os-cpu-scheduling",
+    "topic": "CPU Scheduling",
+    "bloom_level": "APPLY",
+    "question_type": "numerical",
+    "marks": 5,
+    "prerequisites": [],
+    "syllabus": "CPU scheduling decides which process in the ready queue runs next. In First-Come First-Served (FCFS) scheduling, processes run in the order they arrive and each runs to completion. In Shortest Job First (SJF), the process with the smallest CPU burst time is chosen next, which gives the minimum average waiting time but can starve long processes. In Round Robin, each process gets a fixed time quantum and is moved to the back of the queue if it has not finished. Turnaround time is completion time minus arrival time, and waiting time is turnaround time minus burst time."
+  },
+  {
+    "id": "os-deadlock",
+    "topic": "Deadlock",
+    "bloom_level": "ANALYZE",
+    "question_type": "short_answer",
+    "marks": 5,
+    "prerequisites": [],
+    "syllabus": "A deadlock is a situation in which a set of processes are each waiting for a resource held by another process in the set, so none can proceed. Four conditions must hold simultaneously for a deadlock: mutual exclusion, where a resource can be used by only one process at a time; hold and wait, where a process holds a resource while waiting for another; no preemption, where a resource cannot be forcibly taken from a process; and circular wait, where a cycle of processes each waits for the next. Deadlock prevention works by breaking at least one of these four conditions, for example by forcing processes to request all resources at once."
+  },
+  {
+    "id": "os-paging",
+    "topic": "Paging",
+    "bloom_level": "APPLY",
+    "question_type": "numerical",
+    "marks": 5,
+    "prerequisites": [],
+    "syllabus": "Paging is a memory management scheme that divides a process's logical address space into fixed-size blocks called pages, and physical memory into blocks of the same size called frames. A page table maps each page number to a frame number. A logical address is split into a page number and a page offset. If the page size is 2^n bytes, the lowest n bits of the address are the offset and the remaining bits are the page number. Paging removes external fragmentation but can cause internal fragmentation in the last page of a process. The number of pages a process needs is its size divided by the page size, rounded up."
+  },
+  {
+    "id": "dbms-normalization",
+    "topic": "Normalization",
+    "bloom_level": "UNDERSTAND",
+    "question_type": "short_answer",
+    "marks": 5,
+    "prerequisites": [],
+    "syllabus": "Normalization is the process of organizing a relational database to reduce data redundancy and avoid update, insertion, and deletion anomalies. A table is in First Normal Form (1NF) if every column holds atomic values and there are no repeating groups. It is in Second Normal Form (2NF) if it is in 1NF and no non-key attribute depends on only part of a composite primary key. It is in Third Normal Form (3NF) if it is in 2NF and no non-key attribute depends on another non-key attribute, that is, there are no transitive dependencies. Boyce-Codd Normal Form (BCNF) is a stricter version of 3NF in which every determinant must be a candidate key."
+  },
+  {
+    "id": "dbms-acid",
+    "topic": "ACID Properties",
+    "bloom_level": "REMEMBER",
+    "question_type": "mcq",
+    "marks": 1,
+    "prerequisites": [],
+    "syllabus": "A database transaction is a sequence of operations treated as a single logical unit, and it must satisfy the ACID properties. Atomicity means a transaction is all-or-nothing: either every operation is applied or none is. Consistency means a transaction takes the database from one valid state to another, preserving integrity constraints. Isolation means concurrent transactions do not interfere with each other, so the result is as if they ran one after another. Durability means that once a transaction is committed, its changes persist even after a system failure. Atomicity and durability are commonly implemented using write-ahead logging and recovery."
+  },
+  {
+    "id": "dbms-sql-joins",
+    "topic": "SQL Joins",
+    "bloom_level": "APPLY",
+    "question_type": "short_answer",
+    "marks": 5,
+    "prerequisites": [],
+    "syllabus": "A SQL join combines rows from two or more tables based on a related column. An INNER JOIN returns only the rows that have matching values in both tables. A LEFT JOIN returns all rows from the left table and the matching rows from the right table, with NULL values where there is no match. A RIGHT JOIN does the reverse, keeping all rows from the right table. A FULL OUTER JOIN returns all rows from both tables, with NULLs where there is no match. A CROSS JOIN returns the Cartesian product of the two tables, pairing every row of the first table with every row of the second."
+  },
+  {
+    "id": "net-tcp-handshake",
+    "topic": "TCP Three-Way Handshake",
+    "bloom_level": "UNDERSTAND",
+    "question_type": "short_answer",
+    "marks": 5,
+    "prerequisites": ["OSI Model"],
+    "syllabus": "TCP is a connection-oriented, reliable transport protocol. Before data is sent, a connection is established by a three-way handshake. First, the client sends a SYN segment with its initial sequence number. Second, the server replies with a SYN-ACK segment, acknowledging the client's sequence number and sending its own initial sequence number. Third, the client sends an ACK segment acknowledging the server's sequence number, and the connection is established. TCP provides reliability through sequence numbers, acknowledgements, and retransmission of lost segments, and it provides flow control through a sliding window. UDP, in contrast, is connectionless and does not guarantee delivery."
+  },
+  {
+    "id": "net-osi-model",
+    "topic": "OSI Model",
+    "bloom_level": "REMEMBER",
+    "question_type": "fill_in_blank",
+    "marks": 1,
+    "prerequisites": [],
+    "syllabus": "The OSI model divides network communication into seven layers. From bottom to top they are: Physical, Data Link, Network, Transport, Session, Presentation, and Application. The Physical layer transmits raw bits over a medium. The Data Link layer provides node-to-node delivery using MAC addresses and frames. The Network layer handles logical addressing and routing of packets using IP addresses. The Transport layer provides end-to-end delivery, segmentation, and error control, using protocols such as TCP and UDP. The Session layer manages sessions between applications, the Presentation layer handles data formatting, encryption, and compression, and the Application layer provides services such as HTTP and SMTP to user applications."
+  },
+  {
+    "id": "net-dns-resolution",
+    "topic": "DNS Resolution",
+    "bloom_level": "UNDERSTAND",
+    "question_type": "long_answer",
+    "marks": 10,
+    "prerequisites": ["OSI Model"],
+    "syllabus": "The Domain Name System (DNS) translates human-readable domain names into IP addresses. When a client wants to resolve a name, it first asks a recursive resolver, usually run by the ISP. If the answer is not cached, the resolver queries a root name server, which points it to the top-level domain (TLD) server, such as the one for .com. The TLD server points to the authoritative name server for the domain, which returns the IP address. The resolver then returns the answer to the client and caches it for a period set by the record's time-to-live (TTL). Common record types are A for IPv4 addresses, AAAA for IPv6, CNAME for aliases, and MX for mail servers."
+  },
+  {
+    "id": "dsa-binary-search-tree",
+    "topic": "Binary Search Tree",
+    "bloom_level": "APPLY",
+    "question_type": "short_answer",
+    "marks": 5,
+    "prerequisites": ["Big-O Notation"],
+    "syllabus": "A binary search tree (BST) is a binary tree in which, for every node, all keys in the left subtree are smaller than the node's key and all keys in the right subtree are larger. Searching, insertion, and deletion take time proportional to the height of the tree: O(log n) on average for a balanced tree, but O(n) in the worst case when the tree degenerates into a linked list, for example after inserting keys in sorted order. An inorder traversal of a BST visits the keys in ascending order. Self-balancing trees such as AVL trees and red-black trees maintain a height of O(log n) by performing rotations after insertions and deletions."
+  },
+  {
+    "id": "dsa-hash-tables",
+    "topic": "Hash Tables",
+    "bloom_level": "ANALYZE",
+    "question_type": "short_answer",
+    "marks": 5,
+    "prerequisites": ["Big-O Notation"],
+    "syllabus": "A hash table stores key-value pairs and uses a hash function to map each key to an index in an array of buckets, giving average O(1) time for insertion, lookup, and deletion. A collision occurs when two keys map to the same index. In separate chaining, each bucket holds a linked list of all entries that hash to it. In open addressing, a colliding key is placed in another free slot found by a probe sequence, such as linear probing, quadratic probing, or double hashing. The load factor is the number of entries divided by the number of buckets; as it grows, collisions increase, so the table is resized and rehashed when the load factor passes a threshold."
+  },
+  {
+    "id": "dsa-dijkstra",
+    "topic": "Dijkstra's Algorithm",
+    "bloom_level": "APPLY",
+    "question_type": "long_answer",
+    "marks": 10,
+    "prerequisites": [],
+    "syllabus": "Dijkstra's algorithm finds the shortest paths from a single source vertex to all other vertices in a weighted graph with non-negative edge weights. It keeps a distance estimate for every vertex, initially infinity for all vertices except the source, which is zero. It repeatedly selects the unvisited vertex with the smallest distance, marks it visited, and relaxes its outgoing edges: if the distance to the vertex plus the edge weight is less than the neighbour's current distance, the neighbour's distance is updated. With a binary min-heap as the priority queue, the running time is O((V + E) log V). The algorithm does not work correctly with negative edge weights; the Bellman-Ford algorithm is used instead."
+  },
+  {
+    "id": "dsa-recursion",
+    "topic": "Recursion",
+    "bloom_level": "CREATE",
+    "question_type": "short_answer",
+    "marks": 5,
+    "prerequisites": [],
+    "syllabus": "Recursion is a technique in which a function solves a problem by calling itself on a smaller instance of the same problem. Every recursive function needs a base case, which stops the recursion, and a recursive case, which moves toward the base case. Each call is placed on the call stack, so very deep recursion can cause a stack overflow. Classic examples are computing the factorial of n, where factorial(n) = n times factorial(n - 1) with factorial(0) = 1, and the Fibonacci sequence. A naive recursive Fibonacci recomputes the same subproblems many times and takes exponential time, which can be improved by memoization."
+  },
+  {
+    "id": "dsa-dynamic-programming",
+    "topic": "Dynamic Programming",
+    "bloom_level": "ANALYZE",
+    "question_type": "long_answer",
+    "marks": 10,
+    "prerequisites": ["Recursion"],
+    "syllabus": "Dynamic programming solves a problem by breaking it into overlapping subproblems and storing the result of each subproblem so it is computed only once. A problem is suited to dynamic programming if it has optimal substructure, meaning an optimal solution can be built from optimal solutions of its subproblems, and overlapping subproblems. There are two approaches: top-down memoization, which is recursion with a cache, and bottom-up tabulation, which fills a table iteratively starting from the smallest subproblems. The 0/1 knapsack problem and the longest common subsequence problem are classic examples. Dynamic programming differs from divide and conquer because the subproblems overlap."
+  },
+  {
+    "id": "dsa-big-o",
+    "topic": "Big-O Notation",
+    "bloom_level": "EVALUATE",
+    "question_type": "short_answer",
+    "marks": 5,
+    "prerequisites": [],
+    "syllabus": "Big-O notation describes an upper bound on how the running time or space of an algorithm grows as the input size n grows, ignoring constant factors and lower-order terms. Common complexities, from slowest-growing to fastest-growing, are O(1) constant, O(log n) logarithmic, O(n) linear, O(n log n) linearithmic, O(n^2) quadratic, and O(2^n) exponential. Binary search runs in O(log n), a single loop over an array runs in O(n), efficient sorting algorithms such as merge sort run in O(n log n), and nested loops over the same array typically run in O(n^2). Big-O usually describes the worst case, while average-case and best-case analyses are stated separately."
+  },
+  {
+    "id": "ml-overfitting",
+    "topic": "Overfitting",
+    "bloom_level": "UNDERSTAND",
+    "question_type": "short_answer",
+    "marks": 5,
+    "prerequisites": [],
+    "syllabus": "Overfitting occurs when a machine learning model learns the noise and specific details of the training data so well that it performs poorly on new, unseen data. It shows up as a low training error but a high validation or test error. Underfitting is the opposite: the model is too simple to capture the pattern and has high error on both training and test data. Ways to reduce overfitting include collecting more training data, using a simpler model, applying regularization such as L1 or L2 penalties, using dropout in neural networks, stopping training early when validation error starts rising, and using cross-validation to estimate generalization performance."
+  },
+  {
+    "id": "ml-gradient-descent",
+    "topic": "Gradient Descent",
+    "bloom_level": "APPLY",
+    "question_type": "mcq",
+    "marks": 1,
+    "prerequisites": [],
+    "syllabus": "Gradient descent is an optimization algorithm that minimizes a loss function by repeatedly moving the model parameters in the direction opposite to the gradient of the loss. The update rule is: new parameter = old parameter minus (learning rate times gradient). The learning rate controls the step size: if it is too small, training is slow; if it is too large, the updates can overshoot the minimum and fail to converge. Batch gradient descent uses the whole training set for each update, stochastic gradient descent uses one example per update, and mini-batch gradient descent uses a small batch, which is the most common choice in practice."
+  },
+  {
+    "id": "ml-precision-recall",
+    "topic": "Precision and Recall",
+    "bloom_level": "APPLY",
+    "question_type": "numerical",
+    "marks": 5,
+    "prerequisites": [],
+    "syllabus": "For a binary classifier, a confusion matrix counts true positives (TP), false positives (FP), true negatives (TN), and false negatives (FN). Precision is TP divided by (TP + FP): of everything predicted positive, the fraction that is truly positive. Recall is TP divided by (TP + FN): of everything that is truly positive, the fraction the model found. Accuracy is (TP + TN) divided by the total number of examples and can be misleading when classes are imbalanced. The F1 score is the harmonic mean of precision and recall, equal to 2 times precision times recall divided by (precision + recall)."
+  },
+  {
+    "id": "sec-public-key-cryptography",
+    "topic": "Public Key Cryptography",
+    "bloom_level": "UNDERSTAND",
+    "question_type": "short_answer",
+    "marks": 5,
+    "prerequisites": [],
+    "syllabus": "In public-key (asymmetric) cryptography, each user has a key pair: a public key that can be shared with anyone and a private key that is kept secret. Data encrypted with the public key can be decrypted only with the matching private key, so anyone can send a confidential message to the key's owner. For digital signatures the roles are reversed: the owner signs a message hash with the private key, and anyone can verify the signature using the public key, which proves authenticity and integrity. RSA and elliptic curve cryptography are common algorithms. Asymmetric encryption is much slower than symmetric encryption such as AES, so in practice it is used to exchange a symmetric session key, as in TLS."
+  },
+  {
+    "id": "se-scrum",
+    "topic": "Scrum",
+    "bloom_level": "CREATE",
+    "question_type": "short_answer",
+    "marks": 5,
+    "prerequisites": [],
+    "syllabus": "Scrum is an agile framework for developing software in short, fixed-length iterations called sprints, usually one to four weeks long. It defines three roles: the Product Owner, who maintains the prioritized product backlog; the Scrum Master, who coaches the team and removes obstacles; and the Development Team, who build the product increment. Key events are sprint planning, the daily scrum (a 15-minute stand-up), the sprint review, where the increment is demonstrated to stakeholders, and the sprint retrospective, where the team reflects on how to improve. At the end of each sprint the team delivers a potentially shippable increment."
+  },
+  {
+    "id": "sys-load-balancing",
+    "topic": "Load Balancing",
+    "bloom_level": "REMEMBER",
+    "question_type": "fill_in_blank",
+    "marks": 1,
+    "prerequisites": [],
+    "syllabus": "A load balancer distributes incoming requests across multiple servers so that no single server is overloaded, improving availability and throughput. Common algorithms include round robin, which sends requests to servers in rotation; least connections, which sends each request to the server with the fewest active connections; and IP hash, which maps a client's IP address to a particular server so that the same client keeps reaching the same server. A load balancer performs periodic health checks and stops sending traffic to servers that fail them. Load balancers can work at Layer 4, using IP addresses and ports, or at Layer 7, using application data such as HTTP headers and URLs."
+  },
+  {
+    "id": "web-rest-api",
+    "topic": "REST APIs",
+    "bloom_level": "EVALUATE",
+    "question_type": "short_answer",
+    "marks": 5,
+    "prerequisites": [],
+    "syllabus": "REST (Representational State Transfer) is an architectural style for designing web APIs in which resources are identified by URLs and manipulated using the standard HTTP methods. GET reads a resource, POST creates a new resource, PUT replaces a resource, PATCH partially updates it, and DELETE removes it. REST is stateless: each request must contain all the information needed to process it, and the server does not store client session state between requests. Responses use standard HTTP status codes, such as 200 for success, 201 for created, 404 for not found, and 500 for a server error, and the data is commonly formatted as JSON. Statelessness makes REST services easier to scale horizontally."
+  }
+]

@@ -1,7 +1,9 @@
 [tool.pytest.ini_options]
 markers = [
     "llm: hits the real Gemini API (network, uses quota) - excluded by default, run with `-m llm`",
+    "eval: LLM-judged quality evals over the golden dataset (real Gemini calls for generation, embeddings and judging) - excluded by default, run with `-m eval`",
 ]
-addopts = "-m \"not llm\""
+# -p no:deepeval: DeepEval's auto-loaded pytest plugin adds ~13s to every run and the evals don't need it.
+addopts = "-p no:deepeval -m \"not llm and not eval\""
 testpaths = ["tests"]
 pythonpath = ["."]

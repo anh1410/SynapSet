@@ -1,0 +1,2 @@
+# LLM evals (tests/test_llm_evals.py). Install on top of requirements.txt; not needed to run the app.
+deepeval>=4.3,<5
