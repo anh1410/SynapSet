@@ -16,6 +16,8 @@ import re
 import sys
 import tokenize
 
+from app.core.config import get_settings
+
 ALLOWED_IMPORTS = {"math", "random", "string", "itertools", "collections", "functools", "re", "json", "datetime"}
 _DANGEROUS_TOKENS = re.compile(
     r"\b(os|sys|subprocess|socket|shutil|pathlib|importlib|ctypes|multiprocessing|threading|"
@@ -162,6 +164,8 @@ def run_code(source: str, stdin_text: str = "", timeout_seconds: int = 5) -> str
     input() calls, and returns everything printed to stdout. Raises
     UnsafeCodeError if the code fails the safety check or raises at runtime,
     or CodeTimeoutError if it runs too long (e.g. an infinite loop)."""
+    if get_settings().disable_code_execution:
+        raise UnsafeCodeError("Code execution is disabled on this deployment")
     check_code_safety(source)
 
     parent_conn, child_conn = multiprocessing.Pipe()

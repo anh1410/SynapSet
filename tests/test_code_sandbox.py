@@ -88,3 +88,11 @@ def test_run_code_raises_timeout_on_infinite_loop():
 def test_run_code_reports_runtime_error():
     with pytest.raises(UnsafeCodeError):
         run_code("1 / 0")
+
+
+def test_run_code_refuses_when_execution_is_disabled(monkeypatch):
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "disable_code_execution", True)
+    with pytest.raises(UnsafeCodeError, match="disabled"):
+        run_code("print(1)")

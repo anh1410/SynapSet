@@ -1,5 +1,9 @@
-from fastapi import FastAPI
+from pathlib import Path
+
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.api import analytics, auth, exams, graph, paper_review, patterns, questions, student_portal, subjects, submissions
 from app.core.config import get_settings
@@ -34,3 +38,15 @@ app.include_router(student_portal.router)
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+DIST = Path(__file__).resolve().parent.parent / "dist"
+if DIST.is_dir():  # production image: serve the built React app from the same origin
+    app.mount("/assets", StaticFiles(directory=DIST / "assets"), name="assets")
+
+    @app.get("/{path:path}", include_in_schema=False)
+    def spa(path: str) -> FileResponse:
+        if path.startswith("api/"):
+            raise HTTPException(status_code=404)
+        file = (DIST / path).resolve()
+        return FileResponse(file if file.is_file() and DIST in file.parents else DIST / "index.html")

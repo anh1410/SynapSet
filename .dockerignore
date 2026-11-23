@@ -1,0 +1,12 @@
+.git
+.env
+.venv
+node_modules
+dist
+data
+tests
+evals
+__pycache__
+*.pyc
+.claude
+*.gpickle

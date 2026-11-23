@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     app_name: str = "SynapSet"
     environment: str = "development"
     debug: bool = True
+    disable_code_execution: bool = False  # public demos: never run submitted code on the server
 
     # Google Gemini
     google_api_key: str = ""
